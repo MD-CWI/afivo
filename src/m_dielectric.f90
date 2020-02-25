@@ -28,6 +28,9 @@ module m_dielectric
   !> Value indicating there is no surface
   integer, parameter :: no_surface = -1
 
+  !> Value indicating that a photon is not absorbed by the dielectric
+  integer, parameter :: not_absorbed = -1
+
   !> Type for storing all the surfaces on a mesh
   type dielectric_t
      !> Whether the dielectric is initialized
@@ -635,4 +638,50 @@ contains
     ix_cell   = pack(loc%ix, [(i, i=1,NDIM)] /= dim)
   end subroutine dielectric_get_surface_cell
 
+  subroutine dielectric_photon_absorption(tree, diel, x_start, x_stop)
+    use m_domain, only: outside_check
+    ! Determine if an emitted photon is absorbed by the dielectric surface
+    ! Return coordinates of cell connected to absorbing surface
+    type(af_t), intent(in)         :: tree
+    type(dielectric_t), intent(in) :: diel
+    real(dp), intent(inout)           :: x_start(NDIM), x_stop(NDIM) !< Coordinates of photon event
+
+
+    if (outside_check_x(x_stop) == inside_dielectric) then
+      call bisect_line(tree, x_start, x_stop)
+      ! update surface charge by removing one electron
+    else if (outside_check_x(x_stop) == outside_domain)
+      error stop "ACCOUNT FOR OVERSHOOT (hitbox?)"
+    end if
+
+  end subroutine dielectric_photon_absorption
+
+  subroutine bisect_line(tree, x_start, x_stop)
+    type(af_t), intent(in)  :: tree
+    real(dp), intent(inout) :: x_start(NDIM), x_stop(NDIM) !< Coordinates of interval
+    real(dp)             :: distance
+    real(dp)             ::  x_mid(NDIM), m_eps ! middle point variables
+    integer              :: n, n_steps
+
+    distance = norm2(x_start - x_stop)
+    n_steps = -ceiling(log(af_min_dr(tree)/distance) / log(2.0_dp))
+
+    ! Perform bisection method until neighbouring boxes are found
+    do n = 1, n_steps
+      x_mid = 0.5_dp * (x_start + x_stop)
+      m_eps = af_interp0(tree, x_mid, [i_eps])
+      if (m_eps > 1.0_dp) then
+        x_stop = x_mid ! Move the end to the middle
+      else
+        x_start = x_mid ! Move the start to the middle
+      end if
+    end do
+  end subroutine bisect_line
+
+
+
+
 end module m_dielectric
+
+
+! m_domain.f90 now takes particles as input. More general would be to only operate on coordinates
