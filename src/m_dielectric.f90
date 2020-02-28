@@ -638,48 +638,57 @@ contains
     ix_cell   = pack(loc%ix, [(i, i=1,NDIM)] /= dim)
   end subroutine dielectric_get_surface_cell
 
-  subroutine dielectric_photon_absorption(tree, diel, x_start, x_stop)
-    use m_domain, only: outside_check
+  subroutine dielectric_photon_absorbtion(tree, diel, x_start, x_stop, on_surface)
+    use m_domain, only: outside_check_x
     ! Determine if an emitted photon is absorbed by the dielectric surface
     ! Return coordinates of cell connected to absorbing surface
     type(af_t), intent(in)         :: tree
     type(dielectric_t), intent(in) :: diel
-    real(dp), intent(inout)           :: x_start(NDIM), x_stop(NDIM) !< Coordinates of photon event
+    real(dp), intent(inout)        :: x_start(NDIM), x_stop(NDIM) !< Coordinates of photon event
+    logical, intent(inout)         :: on_surface
+    integer                        :: ix_surf         !< Index of surface
+    integer                        :: ix_cell(NDIM-1) !< Index of cell on surface
 
+    if (outside_check_x(x_stop) == 0) exit ! x_stop is in gas
+    call bisect_line(tree, x_start, x_stop, on_surface)
 
-    if (outside_check_x(x_stop) == inside_dielectric) then
-      call bisect_line(tree, x_start, x_stop)
-      ! update surface charge by removing one electron
-    else if (outside_check_x(x_stop) == outside_domain)
-      error stop "ACCOUNT FOR OVERSHOOT (hitbox?)"
-    end if
+    if (.not. on_surface) exit ! The dielectric was not hit
+    ! TODO Update surface charge???
+    !call dielectric_get_surface_cell(tree, diel, x_stop, ix_surf, ix_cell)
+  end subroutine dielectric_photon_absorbtion
 
-  end subroutine dielectric_photon_absorption
-
-  subroutine bisect_line(tree, x_start, x_stop)
+  subroutine bisect_line(tree, x_start, x_stop, on_surface)
+    ! given start (in gas) and stop (not in gas), this method finds the possible transition.
+    ! x_start and x_stop will be moved to corresponding points
     type(af_t), intent(in)  :: tree
     real(dp), intent(inout) :: x_start(NDIM), x_stop(NDIM) !< Coordinates of interval
-    real(dp)             :: distance
-    real(dp)             ::  x_mid(NDIM), m_eps ! middle point variables
-    integer              :: n, n_steps
+    real(dp)                :: distance
+    real(dp)                ::  x_mid(NDIM), m_eps ! middle point variables
+    integer                 :: n, n_steps
+    logical                 :: success
+    logical, intent(out)    :: on_surface
 
     distance = norm2(x_start - x_stop)
     n_steps = -ceiling(log(af_min_dr(tree)/distance) / log(2.0_dp))
 
-    ! Perform bisection method until neighbouring boxes are found
     do n = 1, n_steps
       x_mid = 0.5_dp * (x_start + x_stop)
-      m_eps = af_interp0(tree, x_mid, [i_eps])
-      if (m_eps > 1.0_dp) then
+      m_eps = af_interp0(tree, x_mid, [i_eps], success)
+      if (m_eps > 1.0_dp .or. .not. success) then
         x_stop = x_mid ! Move the end to the middle
       else
         x_start = x_mid ! Move the start to the middle
       end if
     end do
+
+    ! Check if x_stop is in dielectric
+    m_eps = af_interp0(tree, x_stop, [i_eps], success)
+    if (.not. success) then
+       on_surface = .false.
+    else
+       on_surface = .true.
+    end if
   end subroutine bisect_line
-
-
-
 
 end module m_dielectric
 
