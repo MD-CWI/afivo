@@ -2,6 +2,7 @@
 !> This module contains routines for including flat dielectric surfaces
 module m_dielectric
   use m_af_types
+  use m_af_interp
 
   implicit none
   private
@@ -77,6 +78,7 @@ module m_dielectric
   public :: dielectric_correct_field_cc
   public :: dielectric_get_refinement_links
   public :: dielectric_get_surface_cell
+  public :: bisect_line
 
 contains
 
@@ -639,32 +641,40 @@ contains
   end subroutine dielectric_get_surface_cell
 
   subroutine dielectric_photon_absorbtion(tree, diel, x_start, x_stop, on_surface)
-    use m_domain, only: outside_check_x
     ! Determine if an emitted photon is absorbed by the dielectric surface
     ! Return coordinates of cell connected to absorbing surface
     type(af_t), intent(in)         :: tree
     type(dielectric_t), intent(in) :: diel
     real(dp), intent(inout)        :: x_start(NDIM), x_stop(NDIM) !< Coordinates of photon event
+    real(dp)                       :: m_eps(1)
     logical, intent(inout)         :: on_surface
+    logical :: success
     integer                        :: ix_surf         !< Index of surface
     integer                        :: ix_cell(NDIM-1) !< Index of cell on surface
 
-    if (outside_check_x(x_stop) == 0) exit ! x_stop is in gas
-    call bisect_line(tree, x_start, x_stop, on_surface)
 
-    if (.not. on_surface) exit ! The dielectric was not hit
+    m_eps = af_interp0(tree, x_stop, [diel%i_eps], success)
+
+    if (m_eps(1) > 1.0_dp .or. .not. success) then
+      call bisect_line(tree, x_start, x_stop, on_surface, diel%i_eps)
+    end if
+
+    if (.not. on_surface) then
+      !TODO ! The dielectric was not hit
+    end if
     ! TODO Update surface charge???
     !call dielectric_get_surface_cell(tree, diel, x_stop, ix_surf, ix_cell)
   end subroutine dielectric_photon_absorbtion
 
-  subroutine bisect_line(tree, x_start, x_stop, on_surface)
+  subroutine bisect_line(tree, x_start, x_stop, on_surface, i_eps)
     ! given start (in gas) and stop (not in gas), this method finds the possible transition.
     ! x_start and x_stop will be moved to corresponding points
     type(af_t), intent(in)  :: tree
     real(dp), intent(inout) :: x_start(NDIM), x_stop(NDIM) !< Coordinates of interval
     real(dp)                :: distance
-    real(dp)                ::  x_mid(NDIM), m_eps ! middle point variables
+    real(dp)                :: x_mid(NDIM), m_eps(1) ! middle point variables
     integer                 :: n, n_steps
+    integer, intent(in)     :: i_eps
     logical                 :: success
     logical, intent(out)    :: on_surface
 
@@ -674,7 +684,7 @@ contains
     do n = 1, n_steps
       x_mid = 0.5_dp * (x_start + x_stop)
       m_eps = af_interp0(tree, x_mid, [i_eps], success)
-      if (m_eps > 1.0_dp .or. .not. success) then
+      if (m_eps(1) > 1.0_dp .or. .not. success) then
         x_stop = x_mid ! Move the end to the middle
       else
         x_start = x_mid ! Move the start to the middle
