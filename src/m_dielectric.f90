@@ -642,7 +642,6 @@ contains
   end subroutine dielectric_get_surface_cell
 
   subroutine dielectric_photon_absorbtion(tree, i_eps, x_start, x_stop, on_surface)
-    ! TODO THIS CAN BE A FUNCTION THAT RETURNS A LOGICAL
     ! Determine if an emitted photon is absorbed by the dielectric surface
     ! Return coordinates of cell connected to absorbing surface
     type(af_t), intent(in)         :: tree
