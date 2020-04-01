@@ -81,8 +81,8 @@ module m_dielectric
   public :: dielectric_correct_field_cc
   public :: dielectric_get_refinement_links
   public :: dielectric_get_surface_cell
-  public :: dielectric_photon_absorbtion
-  public :: bisect_line
+  ! public :: dielectric_photon_absorbtion
+  ! public :: bisect_line
 
 contains
 
@@ -749,61 +749,4 @@ contains
     ix_cell   = pack(loc%ix, [(i, i=1,NDIM)] /= dim)
   end subroutine dielectric_get_surface_cell
 
-  subroutine dielectric_photon_absorbtion(tree, i_eps, x_start, x_stop, on_surface)
-    ! Determine if an emitted photon is absorbed by the dielectric surface
-    ! Return coordinates of cell connected to absorbing surface
-    type(af_t), intent(in)         :: tree
-    ! type(dielectric_t), intent(in) :: diel
-    integer, intent(in) :: i_eps
-    real(dp), intent(inout)        :: x_start(NDIM), x_stop(NDIM) !< Coordinates of photon event
-    real(dp)                       :: m_eps(1)
-    logical, intent(inout)         :: on_surface
-    logical :: success
-
-    m_eps = af_interp0(tree, x_stop, [i_eps], success)
-    if (m_eps(1) > 1.0_dp .or. .not. success) then
-      call bisect_line(tree, x_start, x_stop, on_surface, i_eps)
-      ! Check if x_stop is in on a surface or outside of domain
-      m_eps = af_interp0(tree, x_stop, [i_eps], success)
-      if (.not. success) then
-         on_surface = .false.
-      else
-         on_surface = .true.
-      end if
-    else
-      on_surface = .false. ! The photon is absorbed by the gas
-    end if
-
-  end subroutine dielectric_photon_absorbtion
-
-  subroutine bisect_line(tree, x_start, x_stop, on_surface, i_eps)
-    ! given start (in gas) and stop (not in gas), this method finds the possible transition.
-    ! x_start and x_stop will be moved to corresponding points
-    type(af_t), intent(in)  :: tree
-    real(dp), intent(inout) :: x_start(NDIM), x_stop(NDIM) !< Coordinates of interval
-    real(dp)                :: distance
-    real(dp)                :: x_mid(NDIM), m_eps(1) ! middle point variables
-    integer                 :: n, n_steps
-    integer, intent(in)     :: i_eps
-    logical                 :: success
-    logical, intent(out)    :: on_surface
-
-    distance = norm2(x_start - x_stop)
-    n_steps = -ceiling(log(af_min_dr(tree)/distance) / log(2.0_dp))
-
-    do n = 1, n_steps
-      x_mid = 0.5_dp * (x_start + x_stop)
-      m_eps = af_interp0(tree, x_mid, [i_eps], success)
-      if (m_eps(1) > 1.0_dp .or. .not. success) then
-        x_stop = x_mid ! Move the end to the middle
-      else
-        x_start = x_mid ! Move the start to the middle
-      end if
-    end do
-
-  end subroutine bisect_line
-
 end module m_dielectric
-
-
-! m_domain.f90 now takes particles as input. More general would be to only operate on coordinates
