@@ -1,4 +1,4 @@
-#include "cpp_macros.h"
+#include "../src/cpp_macros.h"
 !> This module contains routines for including flat dielectric surfaces
 module m_dielectric
   use m_af_types
@@ -82,6 +82,9 @@ module m_dielectric
   public :: dielectric_get_refinement_links
   public :: dielectric_get_surface_cell
   public :: is_box_on_surface
+  public :: get_max_value
+  public :: get_min_value
+
 
 contains
 
@@ -775,5 +778,48 @@ contains
     if (ix_surf == no_surface) ix_surf = diel%box_id_in_to_surface_ix(id)
     if (ix_surf == no_surface) is_box_on_surface = .false.
   end function
+
+  ! > test debug
+  ! get max value of the variable in dielectric
+  subroutine get_max_value(tree, diel, iv, max_out)
+    type(af_t) , intent(inout)         :: tree
+    type(dielectric_t) , intent(inout) :: diel
+    integer                            :: iv
+    real(dp), intent(out)              :: max_out
+    real(dp)                           :: temp
+
+    integer                            :: i, j
+
+    temp = diel%surfaces(1)%sd(1,iv)
+
+    do i = 1,diel%max_ix
+      do j = 1,tree%n_cell
+        if (diel%surfaces(i)%sd(j+1,iv) >= temp) &
+          temp = diel%surfaces(i)%sd(j+1,iv)
+      end do
+    end do
+    max_out = temp
+  end subroutine
+  ! get min value of the variable in dielectric
+  subroutine get_min_value(tree, diel, iv, max_out)
+    type(af_t) , intent(inout)         :: tree
+    type(dielectric_t) , intent(inout) :: diel
+    integer                            :: iv
+    real(dp), intent(out)              :: max_out
+    real(dp)                           :: temp
+
+    integer                            :: i, j
+
+    temp = diel%surfaces(1)%sd(1,iv)
+
+    do i = 1,diel%max_ix
+      do j = 1,tree%n_cell
+        if (diel%surfaces(i)%sd(j+1,iv) <= temp) &
+          temp = diel%surfaces(i)%sd(j+1,iv)
+      end do
+    end do
+    max_out = temp
+  end subroutine
+  ! < test debug
 
 end module m_dielectric
