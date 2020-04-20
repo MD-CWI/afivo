@@ -81,8 +81,7 @@ module m_dielectric
   public :: dielectric_correct_field_cc
   public :: dielectric_get_refinement_links
   public :: dielectric_get_surface_cell
-  ! public :: dielectric_photon_absorbtion
-  ! public :: bisect_line
+  public :: is_box_on_surface
 
 contains
 
@@ -600,9 +599,15 @@ contains
                     (cc_in(0, 1:nc, i_phi) - cc_in(1, 1:nc, i_phi)) &
                     + fac_charge * sd(:, i_sigma)
             case (af_neighb_lowy)
-               fc_out(1:nc, 1, 2, i_fld)  = fac_fld(1) * inv_dr(2) * &
-                    (cc_out(1:nc, 0, i_phi) - cc_out(1:nc, 1, i_phi)) &
-                    + fac_charge * sd(:, i_sigma)
+             fc_out(1:nc, 1, 2, i_fld)  = fac_fld(1) * inv_dr(2) * &
+                  (cc_out(1:nc, 0, i_phi) - cc_out(1:nc, 1, i_phi)) &
+                  + fac_charge * sd(:, i_sigma)
+              ! Other finite difference approximation
+              ! fc_out(1:nc, 1, 2, i_fld)  = - 1 / (1.0_dp + eps) * inv_dr(2) * ( &
+              !     - eps * cc_out(1:nc, 0, i_phi) &
+              !     + 0.5 * (eps - 1.0_dp) * cc_out(1:nc, 1, i_phi) &
+              !     + 0.5 * (eps + 1.0_dp) * cc_out(1:nc, 2, i_phi)) &
+              !     + 0.5 * fac_charge * sd(:, i_sigma)
                fc_in(1:nc, nc+1, 2, i_fld) = fac_fld(2) * inv_dr(2) * &
                     (cc_in(1:nc, nc, i_phi) - cc_in(1:nc, nc+1, i_phi)) &
                     - fac_charge * sd(:, i_sigma)
@@ -610,6 +615,12 @@ contains
                fc_out(1:nc, nc+1, 2, i_fld) = fac_fld(1) * inv_dr(2) * &
                     (cc_out(1:nc, nc, i_phi) - cc_out(1:nc, nc+1, i_phi)) &
                     - fac_charge * sd(:, i_sigma)
+               ! Other finite difference approximation
+               ! fc_out(1:nc, nc+1, 2, i_fld)  = - 1 / (1.0_dp + eps) * inv_dr(2) * ( &
+               !     - eps * cc_out(1:nc, nc+1, i_phi) &
+               !     + 0.5 * (eps - 1.0_dp) * cc_out(1:nc, nc, i_phi) &
+               !     + 0.5 * (eps + 1.0_dp) * cc_out(1:nc, nc-1, i_phi)) &
+               !     - 0.5 * fac_charge * sd(:, i_sigma)
                fc_in(1:nc, 1, 2, i_fld)  = fac_fld(2) * inv_dr(2) * &
                     (cc_in(1:nc, 0, i_phi) - cc_in(1:nc, 1, i_phi)) &
                     + fac_charge * sd(:, i_sigma)
@@ -748,5 +759,21 @@ contains
     dim       = af_neighb_dim(direction)
     ix_cell   = pack(loc%ix, [(i, i=1,NDIM)] /= dim)
   end subroutine dielectric_get_surface_cell
+
+  logical function is_box_on_surface(tree, diel, box)
+    use m_af_utils, only: af_get_id_at
+    type(af_t), intent(in)          :: tree
+    type(dielectric_t), intent(in)  :: diel
+    type(box_t), intent(in)         :: box
+    integer                         :: ix_surf, id
+
+    is_box_on_surface = .true.
+    id = af_get_id_at(tree, box%r_min)
+
+    ! Check for a surface from both sides
+    ix_surf = diel%box_id_out_to_surface_ix(id)
+    if (ix_surf == no_surface) ix_surf = diel%box_id_in_to_surface_ix(id)
+    if (ix_surf == no_surface) is_box_on_surface = .false.
+  end function
 
 end module m_dielectric
