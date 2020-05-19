@@ -107,7 +107,7 @@ contains
     integer                      :: iostat, ierr, dboptix
 
     interface
-      function dbputcurve(dbid, curvename, lcurvename, &
+      integer (c_int) function dbputcurve(dbid, curvename, lcurvename, &
         xvals, yvals, datatype, npoints, optlist_id, status)
         use, intrinsic :: iso_c_binding
         integer(c_int) :: dbid, lcurvename, datatype, npoints, status, optlist_id
@@ -340,7 +340,7 @@ contains
     ierr = dbmkoptlist(10, dboptix)
 
     if (present(n_cycle)) then
-       ierr = dbaddiopt(dboptix, DBOPT_CYCLE, n_cycle)
+       ierr = dbaddiopt(dboptix, DBOPT_CYCLE, dble(n_cycle))
     end if
 
     if (present(time)) then
@@ -404,7 +404,7 @@ contains
     end if
 
     if (present(n_cycle)) then
-       ierr = dbaddiopt(dboptix, DBOPT_CYCLE, n_cycle)
+       ierr = dbaddiopt(dboptix, DBOPT_CYCLE, dble(n_cycle))
     end if
 
     if (present(time)) then
