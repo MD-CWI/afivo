@@ -4,6 +4,7 @@
 !> interpolation for meshes is called prolongation, see m_aX_prolong.
 module m_af_interp
   use m_af_types
+  use m_af_utils
 
   implicit none
   private
@@ -12,6 +13,7 @@ module m_af_interp
   public :: af_interp1
   public :: af_interp0_to_grid
   public :: af_interp1_fc
+  public :: af_interp_trilinear_fc
 
 contains
 
@@ -189,5 +191,84 @@ contains
 #endif
     end if
   end function af_interp1_fc
+
+
+  !> Perform trilinear interpolation of a face-centered variable to a position r
+  function af_interp_trilinear_fc(tree, r, ifc, success, id_guess) result(vals)
+    use m_af_utils, only: af_get_id_at
+    type(af_t), intent(in)           :: tree     !< Parent box
+    real(dp), intent(in)             :: r(NDIM)  !< Where to interpolate
+    integer, intent(in)              :: ifc      !< Face-centered variable
+    logical, intent(out)             :: success  !< Whether the interpolation worked
+    integer, intent(inout), optional :: id_guess !< Guess for box id (will be updated)
+    real(dp)                         :: vals(NDIM), p1(NDIM), p2(NDIM)
+    integer                          :: direction, nc, id
+
+    id = af_get_id_at(tree, r, guess=id_guess)
+
+    ! Update guess
+    if (present(id_guess)) id_guess = id
+
+    if (id <= af_no_box) then
+       success = .false.
+       vals = 0.0_dp
+    else
+       success = .true.
+       nc = tree%boxes(id)%n_cell
+       do direction = 1, NDIM
+         p1 = af_get_fc_corner_low(tree%boxes(id), direction)
+         p2 = af_get_fc_corner_hi(tree%boxes(id), direction)
+#if NDIM == 2
+         error stop "BILINEAR INTERPOLATION NOT IMPLEMENTED"
+#elif NDIM == 3
+         vals(direction) = trilinear(r, p1, p2, tree%boxes(id)%fc(DTIMES(:), direction, ifc))
+#endif
+       end do
+     end if
+
+  end function af_interp_trilinear_fc
+
+  !> Returns trilinear interpolation of a point (x, y, z) in a unit box
+  real(dp) function trilinear_unitbox(xyz, V) result(Vxyz)
+  ! This function is taken from: https://github.com/certik/hfsolver/blob/master/src/interp3d.f90
+  real(dp), intent(in) :: xyz(3)  ! The point in a unit box [0,1] x [0,1] x [0,1]
+  ! V(i, j, k) ... value at vertex i, j, k of the box, where i,j,k = 1,2:
+  real(dp), intent(in) :: V(:, :, :)
+  real(dp) :: x, y, z
+  x = xyz(1)
+  y = xyz(2)
+  z = xyz(3)
+  Vxyz = &
+    V(1, 1, 1) * (1-x)*(1-y)*(1-z) + &
+    V(2, 1, 1) *   x  *(1-y)*(1-z) + &
+    V(1, 2, 1) * (1-x)*  y  *(1-z) + &
+    V(1, 1, 2) * (1-x)*(1-y)*  z   + &
+    V(1, 2, 2) * (1-x)*  y  *  z   + &
+    V(2, 1, 2) *   x  *(1-y)*  z   + &
+    V(2, 2, 1) *   x  *  y  *(1-z) + &
+    V(2, 2, 2) *   x  *  y  *  z
+  end function
+
+  !> Returns trilinear interpolation of a point 'x' using uniform data 'values'
+  !> specified in a box determined by 'p1' and 'p2' points.
+  real(dp) function trilinear(x, p1, p2, values) result(r)
+  !This function is taken from: https://github.com/certik/hfsolver/blob/master/src/interp3d.f90
+    real(dp), intent(in) :: x(:) ! The 3D coordinates of a point to interpolate
+    real(dp), intent(in) :: p1(:) ! The lower left front corner is p1(3)
+    real(dp), intent(in) :: p2(:) ! The upper right back corner is p2(3)
+    real(dp), intent(in) :: values(:, :, :) ! Values on a uniform 3D grid
+    real(dp) :: x0(3)
+    integer :: ijk(3), nelem(3)
+    ! Number of elements in each direction:
+    nelem = shape(values) - 1
+    ! Transform to box [0,1] x [0,1] x [0,1] * nelem, that is, make the
+    ! element length exactly 1 in each direction
+    x0 = nelem * (x - p1) / (p2 - p1)
+    ijk = int(x0)+1 ! indices of the nearest vertex
+    where (ijk > nelem) ijk = nelem
+    where (ijk < 1) ijk = 1
+    r = trilinear_unitbox(x0-ijk+1, values(ijk(1):ijk(1)+1, ijk(2):ijk(2)+1, &
+    ijk(3):ijk(3)+1))
+  end function
 
 end module m_af_interp

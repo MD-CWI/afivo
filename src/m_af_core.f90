@@ -471,10 +471,10 @@ contains
     if (.not. allocated(box%cc)) then
 #if NDIM == 2
        allocate(box%cc(0:n_cell+1, 0:n_cell+1, n_cc))
-       allocate(box%fc(n_cell+1,   n_cell+1, NDIM, n_fc))
+       allocate(box%fc(0:n_cell+2, 0:n_cell+2, NDIM, n_fc))
 #elif NDIM == 3
        allocate(box%cc(0:n_cell+1, 0:n_cell+1, 0:n_cell+1, n_cc))
-       allocate(box%fc(n_cell+1,   n_cell+1,   n_cell+1, NDIM, n_fc))
+       allocate(box%fc(0:n_cell+2, 0:n_cell+2, 0:n_cell+2, NDIM, n_fc))
 #endif
     end if
 

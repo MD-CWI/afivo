@@ -131,6 +131,10 @@ module m_af_types
   integer, parameter :: af_neighb_rev(4) = [2, 1, 4, 3]
   !> Direction (dimension) for a neighbor
   integer, parameter :: af_neighb_dim(4) = [1, 1, 2, 2]
+
+  !> Cartesian unit vectors, second argument denotes the dimension (x or y)
+  ! real(dp), parameter :: af_unit_vector(2, 2) = reshape([1,0 , 0,1], [2,2])
+  real(dp), parameter :: af_unit_vector(2, 2) = reshape([1,0 , 0,1], [2,2])
 #elif NDIM == 3
   !> Number of children
   integer, parameter :: af_num_children = 8
@@ -211,6 +215,9 @@ module m_af_types
        [0,0,0, 0,1,0, 0,0,1, 0,1,1, &
        0,0,0, 1,0,0, 0,0,1, 1,0,1, &
        0,0,0, 1,0,0, 0,1,0, 1,1,0], [3,12])
+
+  !> Cartesian unit vectors, second argument denotes the dimension (x, y or z)
+  real(dp), parameter :: af_unit_vector(3,3) = reshape([1,0,0 , 0,1,0 , 0,0,1], [3,3])
 #endif
 
   !> Collection of methods for a cell-centered variable

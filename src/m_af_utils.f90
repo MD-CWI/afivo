@@ -48,6 +48,8 @@ module m_af_utils
   public :: af_r_loc
   public :: af_r_inside
   public :: af_n_cell
+  public :: af_get_fc_corner_low
+  public :: af_get_fc_corner_hi
 
 contains
 
@@ -1065,5 +1067,25 @@ contains
        n_cell = tree%n_cell / (2**(1-lvl))
     end if
   end function af_n_cell
+
+  !> Return the coordinates of the lower left face-centered value
+  !> This function assumes face-centered ghost values in each direction
+  pure function af_get_fc_corner_low(box, direction) result(corner_low)
+    type(box_t), intent(in) :: box
+    integer, intent(in)     :: direction
+    real(dp)                :: corner_low(NDIM)
+
+    corner_low = box%r_min - 0.5*box%dr - 0.5*box%dr(direction)*af_unit_vector(:, direction)
+  end function af_get_fc_corner_low
+
+  !> Return the coordinates of the top right face-centered values
+  !> This function assumes face-centered ghost values in each direction
+  pure function af_get_fc_corner_hi(box, direction) result(corner_hi)
+    type(box_t), intent(in) :: box
+    integer, intent(in)     :: direction
+    real(dp)                :: corner_hi(NDIM)
+
+    corner_hi  = box%r_min + (box%n_cell+0.5) * box%dr + 0.5 * box%dr(direction) * af_unit_vector(:, direction)
+  end function af_get_fc_corner_hi
 
 end module m_af_utils
