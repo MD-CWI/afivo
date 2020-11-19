@@ -21,6 +21,7 @@ module m_write_silo
   public :: SILO_add_var
   public :: SILO_set_mmesh_grid
   public :: SILO_set_mmesh_var
+  public :: SILO_add_curve
 
 contains
 
@@ -344,7 +345,7 @@ contains
     end if
 
     if (present(time)) then
-       ierr = dbaddiopt(dboptix, DBOPT_DTIME, time)
+       ierr = dbadddopt(dboptix, DBOPT_DTIME, time)
     end if
 
     ierr = dbputmmesh(dbix, trim(mmname), len_trim(mmname), n_grids, &
@@ -408,13 +409,15 @@ contains
     end if
 
     if (present(time)) then
-       ierr = dbaddiopt(dboptix, DBOPT_DTIME, time)
+       ierr = dbadddopt(dboptix, DBOPT_DTIME, time)
     end if
 
+    ! Jannis: valgrind complains about a memory leak due to this call, but if
+    ! that leak is there, it seems to be Silo's fault.
     ierr = dbaddcopt(dboptix, DBOPT_MMESH_NAME, &
          trim(mmname), len_trim(mmname))
     if (ierr /= 0) print *, &
-            "Error dbaddiopt is SILO_set_mmesh_var: DBOPT_MMESH_NAME", ierr
+            "Error dbaddiopt in SILO_set_mmesh_var: DBOPT_MMESH_NAME", ierr
 
     ierr = dbputmvar(dbix, trim(mvname), len_trim(mvname), n_grids, &
          dnames(1:total_len), name_lengths, m_types, dboptix, iostat)
@@ -425,5 +428,47 @@ contains
     ierr = dbfreeoptlist(dboptix)
     length = dbset2dstrlen(old_str_len)
   end subroutine SILO_set_mmesh_var
+
+  !> Add a curve-object (pairs of x-y values) to the Silo file
+  subroutine SILO_add_curve(dbix, curvename, xvals, yvals, xname, yname)
+    character(len=*), intent(in) :: curvename
+    integer, intent(in)          :: dbix
+    real(dp), intent(in)         :: xvals(:), yvals(:)
+    character(len=*), intent(in) :: xname, yname
+    integer                      :: iostat, ierr, dboptix
+
+    interface
+       integer (c_int) function dbputcurve(dbid, curvename, lcurvename, &
+            xvals, yvals, datatype, npoints, optlist_id, status)
+         use, intrinsic :: iso_c_binding
+         integer(c_int) :: dbid, lcurvename, datatype, npoints, status, optlist_id
+         real(c_double) ::  xvals(*), yvals(*)
+         character(kind=c_char) :: curvename(*)
+       end function dbputcurve
+
+       integer (c_int) function dbaddiopt(optlist_id, option, ivalue)
+         use, intrinsic :: iso_c_binding
+         integer(c_int), intent(in) :: optlist_id, option, ivalue(*)
+       end function dbaddiopt
+    end interface
+
+    if (size(xvals) /= size(yvals)) &
+       error stop "SILO_add_curve: x and y arrays unequal size"
+
+    ierr = dbmkoptlist(20, dboptix)
+    if (ierr /= 0) error stop "creating options list in SILO_add_curve "
+
+    ierr = dbaddcopt(dboptix, DBOPT_XLABEL, trim(xname), len_trim(xname))
+    if (ierr /= 0) error stop "adding option in SILO_add_curve"
+    ierr = dbaddcopt(dboptix, DBOPT_YLABEL, trim(yname), len_trim(yname))
+    if (ierr /= 0) error stop "adding option in SILO_add_curve"
+
+    ierr = dbputcurve(dbix, trim(curvename), len_trim(curvename), &
+         xvals, yvals, DB_DOUBLE, size(xvals), dboptix, iostat)
+    if (ierr /= 0) error stop "curve object not added to SILO file"
+
+    ierr = dbfreeoptlist(dboptix)
+    if (ierr /= 0) error stop "dbfreeoptlist in SILO_add_curve"
+  end subroutine SILO_add_curve
 
 end module m_write_silo

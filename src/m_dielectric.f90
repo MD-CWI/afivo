@@ -19,11 +19,8 @@ module m_dielectric
      integer               :: offset_parent(NDIM-1) !< Index of parent surface
      real(dp)              :: dr(NDIM-1) !< Grid spacing on surface
      !> Surface densities
-#if NDIM == 2
-     real(dp), allocatable :: sd(:, :)
-#elif NDIM == 3
-     real(dp), allocatable :: sd(:, :, :)
-#endif
+     real(dp), allocatable :: sd(DTIMES(:))
+
   end type surface_t
 
   !> Value indicating there is no surface
@@ -192,7 +189,9 @@ contains
 
     if (.not. use_removed) then
        nc = diel%n_cell
-#if NDIM == 2
+#if NDIM == 1
+       allocate(diel%surfaces(ix)%sd(diel%n_variables))
+#elif NDIM == 2
        allocate(diel%surfaces(ix)%sd(nc, diel%n_variables))
 #elif NDIM == 3
        allocate(diel%surfaces(ix)%sd(nc, nc, diel%n_variables))
@@ -206,13 +205,16 @@ contains
     use m_af_ghostcell, only: af_gc_get_boundary_coords
     type(af_t), intent(in)            :: tree
     type(dielectric_t), intent(inout) :: diel
-    integer, intent(in)               :: iv !< Surface variable
+    integer, intent(in)               :: iv        !< Surface variable
     procedure(value_func)             :: user_func !< User supplied function
-    integer                           :: i, ix, id_out
-#if NDIM == 3
-    integer :: j, n
+    integer                           :: ix, id_out
+#if NDIM > 1
+    integer                           :: i
 #endif
-    real(dp) :: coords(NDIM, tree%n_cell**(NDIM-1))
+#if NDIM == 3
+    integer                           :: j, n
+#endif
+    real(dp)                          :: coords(NDIM, tree%n_cell**(NDIM-1))
 
     if (.not. diel%initialized) error stop "dielectric not initialized"
 
@@ -222,7 +224,9 @@ contains
           id_out = diel%surfaces(ix)%id_out
           call af_gc_get_boundary_coords(tree%boxes(id_out), &
                diel%surfaces(ix)%direction, coords)
-#if NDIM == 2
+#if NDIM == 1
+          diel%surfaces(ix)%sd(iv) = user_func(coords(1, 1))
+#elif NDIM == 2
           do i = 1, tree%n_cell
              diel%surfaces(ix)%sd(i, iv) = user_func(coords(:, i))
           end do

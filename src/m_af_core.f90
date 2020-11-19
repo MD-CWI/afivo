@@ -24,7 +24,7 @@ contains
   !> Add cell-centered variable
   !> @todo ix as third argument?
   subroutine af_add_cc_variable(tree, name, write_out, n_copies, &
-       max_lvl, ix, write_binary)
+       ix, write_binary)
     !> Tree to add variable to
     type(af_t), intent(inout)      :: tree
     !> Name of the variable
@@ -35,22 +35,17 @@ contains
     logical, intent(in), optional  :: write_binary
     !> How many copies of variable to store (default: 1)
     integer, intent(in), optional  :: n_copies
-    !> Store variable up to this refinement level (default: af_max_lvl)
-    integer, intent(in), optional  :: max_lvl
     !> On output: index of variable
     integer, intent(out), optional :: ix
 
-    integer :: n
-    integer :: ncpy, maxlvl
+    integer :: n, ncpy
     logical :: writeout, writebin
 
     ncpy = 1; if (present(n_copies)) ncpy = n_copies
     writeout = .true.; if (present(write_out)) writeout = write_out
     writebin = .true.; if (present(write_binary)) writebin = write_binary
-    maxlvl = 100; if (present(max_lvl)) maxlvl = max_lvl
 
     if (ncpy < 1) error stop "af_add_cc_variable: n_copies < 1"
-    if (maxlvl < 1) error stop "af_add_cc_variable: max_lvl < 1"
 
     do n = 1, ncpy
        tree%n_var_cell = tree%n_var_cell + 1
@@ -59,15 +54,13 @@ contains
           tree%cc_names(tree%n_var_cell)        = name
           tree%cc_write_output(tree%n_var_cell) = writeout
           tree%cc_write_binary(tree%n_var_cell) = writebin
-          tree%cc_max_level(tree%n_var_cell)    = maxlvl
           tree%cc_num_copies(tree%n_var_cell)   = ncpy
        else
           write(tree%cc_names(tree%n_var_cell), "(A,I0)") &
                trim(name) // '_', n
           tree%cc_write_output(tree%n_var_cell) = .false.
           tree%cc_write_binary(tree%n_var_cell) = .false.
-          tree%cc_max_level(tree%n_var_cell)    = maxlvl
-          tree%cc_num_copies(tree%n_var_cell)   = 1
+          tree%cc_num_copies(tree%n_var_cell)   = 0
        end if
     end do
 
@@ -152,9 +145,7 @@ contains
     if (n_cell < 2)       stop "af_init: n_cell should be >= 2"
     if (btest(n_cell, 0)) stop "af_init: n_cell should be even"
     if (gb_limit <= 0)    stop "af_init: mem_limit_gb should be > 0"
-#if NDIM == 3
-    if (coord_a == af_cyl) stop "af_init: cannot have 3d cyl coords"
-#endif
+    if (coord_a == af_cyl .and. NDIM /= 2) stop "af_init: cyl. coords only in 2d"
     if (tree%n_var_cell <= 0) stop "af_init: no cell-centered variables present"
 
     do lvl = af_min_lvl, af_max_lvl
@@ -182,8 +173,10 @@ contains
     allocate(tree%removed_ids(tree%box_limit))
 
     ! Initialize list of cell-centered variables with methods
-    if (.not. allocated(tree%cc_method_vars)) &
-         allocate(tree%cc_method_vars(0))
+    if (.not. allocated(tree%cc_auto_vars)) &
+         allocate(tree%cc_auto_vars(0))
+    if (.not. allocated(tree%cc_func_vars)) &
+         allocate(tree%cc_func_vars(0))
 
     call af_set_coarse_grid(tree, grid_size, periodic)
 
@@ -199,6 +192,7 @@ contains
     logical, intent(in), optional :: periodic_dims(NDIM)
     logical                       :: periodic(NDIM)
     integer                       :: nx(NDIM), ix(NDIM), IJK, id, n_boxes, nb
+    integer                       :: n, iv
     integer, allocatable          :: id_array(DTIMES(:))
 
     if (tree%highest_id > 0) &
@@ -235,7 +229,31 @@ contains
     tree%lvls(1)%leaves = tree%lvls(1)%ids
 
     ! Loop over the boxes and set their neighbors
-#if NDIM == 2
+#if NDIM == 1
+    do i = 1, nx(1)
+       id                     = id_array(IJK)
+       tree%boxes(id)%lvl     = 1
+       tree%boxes(id)%ix      = [IJK]
+       tree%boxes(id)%dr      = tree%dr_base
+       tree%boxes(id)%r_min   = tree%r_base + &
+            (tree%boxes(id)%ix - 1) * tree%dr_base * tree%n_cell
+       tree%boxes(id)%n_cell  = tree%n_cell
+       tree%boxes(id)%coord_t = tree%coord_t
+
+       tree%boxes(id)%parent      = af_no_box
+       tree%boxes(id)%children(:) = af_no_box
+
+       ! Connectivity
+       do nb = 1, af_num_neighbors
+          ix = [IJK] + af_neighb_dix(:, nb)
+          tree%boxes(id)%neighbors(nb) = id_array(ix(1))
+       end do
+       tree%boxes(id)%neighbor_mat = id_array(i-1:i+1)
+
+       call af_init_box(tree%boxes(id), tree%boxes(id)%n_cell, &
+            tree%n_var_cell, tree%n_var_face)
+    end do
+#elif NDIM == 2
     do j = 1, nx(2)
        do i = 1, nx(1)
           id                     = id_array(IJK)
@@ -293,51 +311,87 @@ contains
 
     tree%highest_lvl = 1
 
+    ! Set values for variables with a 'funcval'
+    do i = 1, size(tree%lvls(1)%ids)
+       id = tree%lvls(1)%ids(i)
+       do n = 1, size(tree%cc_func_vars)
+          iv = tree%cc_func_vars(n)
+          call tree%cc_methods(iv)%funcval(tree%boxes(id), iv)
+       end do
+    end do
+
   end subroutine af_set_coarse_grid
 
   !> Set the methods for a cell-centered variable
-  subroutine af_set_cc_methods(tree, iv, bc, rb, prolong, restrict)
+  subroutine af_set_cc_methods(tree, iv, bc, rb, prolong, restrict, &
+       bc_custom, funcval)
     use m_af_ghostcell, only: af_gc_interp
     use m_af_prolong, only: af_prolong_linear
     use m_af_restrict, only: af_restrict_box
-    type(af_t), intent(inout)             :: tree     !< Tree to operate on
-    integer, intent(in)                   :: iv       !< Index of variable
-    procedure(af_subr_bc)                 :: bc       !< Boundary condition method
-    procedure(af_subr_rb), optional       :: rb       !< Refinement boundary method
-    procedure(af_subr_prolong), optional  :: prolong  !< Prolongation method
-    procedure(af_subr_restrict), optional :: restrict !< Restriction method
-    integer                               :: i, n
+    type(af_t), intent(inout)              :: tree      !< Tree to operate on
+    integer, intent(in)                    :: iv        !< Index of variable
+    procedure(af_subr_bc), optional        :: bc        !< Boundary condition method
+    procedure(af_subr_rb), optional        :: rb        !< Refinement boundary method
+    procedure(af_subr_prolong), optional   :: prolong   !< Prolongation method
+    procedure(af_subr_restrict), optional  :: restrict  !< Restriction method
+    procedure(af_subr_bc_custom), optional :: bc_custom !< Custom b.c. method
+    procedure(af_subr_funcval), optional   :: funcval   !< Variable defined by function
+    integer                                :: i
 
-    if (tree%has_cc_method(iv)) &
-         error stop "Cannot call af_set_cc_methods twice for same iv"
-
-    tree%cc_methods(iv)%bc => bc
-
-    if (present(rb)) then
-       tree%cc_methods(iv)%rb => rb
-    else
-       tree%cc_methods(iv)%rb => af_gc_interp
+    if (tree%has_cc_method(iv)) then
+       print *, "Cannot call af_set_cc_methods twice for ", &
+            trim(tree%cc_names(iv))
+       error stop
     end if
 
-    if (present(prolong)) then
-       tree%cc_methods(iv)%prolong => prolong
+    ! Set methods for the variable and its copies
+    do i = iv, iv + tree%cc_num_copies(iv) - 1
+       if (present(bc)) then
+          tree%cc_methods(i)%bc => bc
+       else if (present(bc_custom)) then
+          tree%cc_methods(i)%bc_custom => bc_custom
+       else if (.not. present(funcval)) then
+          error stop "af_set_cc_methods: bc, bc_custom or funcval required"
+       end if
+
+       if (present(funcval)) then
+          tree%cc_methods(i)%funcval => funcval
+       end if
+
+       if (present(rb)) then
+          tree%cc_methods(i)%rb => rb
+       else
+          tree%cc_methods(i)%rb => af_gc_interp
+       end if
+
+       if (present(prolong)) then
+          tree%cc_methods(i)%prolong => prolong
+       else
+          tree%cc_methods(i)%prolong => af_prolong_linear
+       end if
+
+       if (present(restrict)) then
+          tree%cc_methods(i)%restrict => restrict
+       else
+          tree%cc_methods(i)%restrict => af_restrict_box
+       end if
+
+       tree%has_cc_method(i) = .true.
+    end do
+
+    if (.not. allocated(tree%cc_auto_vars)) &
+         allocate(tree%cc_auto_vars(0))
+    if (.not. allocated(tree%cc_func_vars)) &
+         allocate(tree%cc_func_vars(0))
+
+
+    ! Append only original variable, so that the copies are not automatically
+    ! prolongated etc.
+    if (present(funcval)) then
+       tree%cc_func_vars = [tree%cc_func_vars, iv]
     else
-       tree%cc_methods(iv)%prolong => af_prolong_linear
+       tree%cc_auto_vars = [tree%cc_auto_vars, iv]
     end if
-
-    if (present(restrict)) then
-       tree%cc_methods(iv)%restrict => restrict
-    else
-       tree%cc_methods(iv)%restrict => af_restrict_box
-    end if
-
-    tree%has_cc_method(iv) = .true.
-
-    if (.not. allocated(tree%cc_method_vars)) &
-         allocate(tree%cc_method_vars(0))
-
-    n = size(tree%cc_method_vars)
-    tree%cc_method_vars = [(tree%cc_method_vars(i), i=1,n), iv]
 
   end subroutine af_set_cc_methods
 
@@ -350,7 +404,8 @@ contains
     if (.not. tree%ready) stop "af_destroy: Tree not fully initialized"
     deallocate(tree%boxes)
     deallocate(tree%removed_ids)
-    deallocate(tree%cc_method_vars)
+    deallocate(tree%cc_auto_vars)
+    deallocate(tree%cc_func_vars)
 
     do lvl = af_min_lvl, af_max_lvl
        deallocate(tree%lvls(lvl)%ids)
@@ -373,7 +428,9 @@ contains
     integer, intent(inout), allocatable :: id_array(DTIMES(:))
     integer                             :: IJK
 
-#if NDIM == 2
+#if NDIM == 1
+    allocate(id_array(0:nx(1)+1))
+#elif NDIM == 2
     allocate(id_array(0:nx(1)+1, 0:nx(2)+1))
 #elif NDIM == 3
     allocate(id_array(0:nx(1)+1, 0:nx(2)+1, 0:nx(3)+1))
@@ -381,7 +438,16 @@ contains
 
     id_array = af_phys_boundary
 
-#if NDIM == 2
+#if NDIM == 1
+    do i = 1, nx(1)
+       id_array(i) = i
+    end do
+
+    if (periodic(1)) then
+       id_array(0) = id_array(nx(1))
+       id_array(nx(1)+1) = id_array(1)
+    end if
+#elif NDIM == 2
     do j = 1, nx(2)
        do i = 1, nx(1)
           id_array(i, j) = (j-1) * nx(1) + i
@@ -469,7 +535,10 @@ contains
 
     ! Sometimes we re-use a removed box, then we don't have to re-allocate
     if (.not. allocated(box%cc)) then
-#if NDIM == 2
+#if NDIM == 1
+       allocate(box%cc(0:n_cell+1, n_cc))
+       allocate(box%fc(n_cell+1,   NDIM, n_fc))
+#elif NDIM == 2
        allocate(box%cc(0:n_cell+1, 0:n_cell+1, n_cc))
        allocate(box%fc(0:n_cell+2, 0:n_cell+2, NDIM, n_fc))
 #elif NDIM == 3
@@ -494,7 +563,9 @@ contains
           nb_id = find_neighb(boxes, id, [IJK])
           if (nb_id > af_no_box) then
              boxes(id)%neighbor_mat(IJK) = nb_id
-#if NDIM == 2
+#if NDIM == 1
+             boxes(nb_id)%neighbor_mat(-i) = id
+#elif NDIM == 2
              boxes(nb_id)%neighbor_mat(-i, -j) = id
 #elif NDIM == 3
              boxes(nb_id)%neighbor_mat(-i, -j, -k) = id
@@ -505,7 +576,9 @@ contains
 
     do nb = 1, af_num_neighbors
        if (boxes(id)%neighbors(nb) == af_no_box) then
-#if NDIM == 2
+#if NDIM == 1
+          nb_id = boxes(id)%neighbor_mat(af_neighb_dix(1, nb))
+#elif NDIM == 2
           nb_id = boxes(id)%neighbor_mat(af_neighb_dix(1, nb), &
                af_neighb_dix(2, nb))
 #elif NDIM == 3
@@ -538,11 +611,7 @@ contains
        dix_c = 0
     end where
 
-#if NDIM == 2
-    p_id = boxes(p_id)%neighbor_mat(dix_c(1), dix_c(2))
-#elif NDIM == 3
-    p_id = boxes(p_id)%neighbor_mat(dix_c(1), dix_c(2), dix_c(3))
-#endif
+    p_id = boxes(p_id)%neighbor_mat(DINDEX(dix_c))
 
     if (p_id <= af_no_box) then
        nb_id = p_id
@@ -718,18 +787,17 @@ contains
   subroutine auto_restrict(tree, id)
     type(af_t), intent(inout) :: tree
     integer, intent(in)        :: id
-    integer                    :: iv, i_ch, ch_id
+    integer                    :: i, iv, i_ch, ch_id
 
     if (.not. any(tree%has_cc_method(:))) return
 
-    do iv = 1, tree%n_var_cell
-       if (tree%has_cc_method(iv)) then
-          do i_ch = 1, af_num_children
-             ch_id = tree%boxes(id)%children(i_ch)
-             call tree%cc_methods(iv)%restrict(tree%boxes(ch_id), &
-                  tree%boxes(id), iv)
-          end do
-       end if
+    do i_ch = 1, af_num_children
+       ch_id = tree%boxes(id)%children(i_ch)
+       do i = 1, size(tree%cc_auto_vars)
+          iv = tree%cc_auto_vars(i)
+          call tree%cc_methods(iv)%restrict(tree%boxes(ch_id), &
+               tree%boxes(id), [iv])
+       end do
     end do
   end subroutine auto_restrict
 
@@ -752,10 +820,14 @@ contains
           id = ref_info%lvls(lvl)%add(i)
           p_id = tree%boxes(id)%parent
 
-          do n = 1, size(tree%cc_method_vars)
-             iv = tree%cc_method_vars(n)
+          do n = 1, size(tree%cc_auto_vars)
+             iv = tree%cc_auto_vars(n)
              call tree%cc_methods(iv)%prolong(tree%boxes(p_id), &
                   tree%boxes(id), iv)
+          end do
+          do n = 1, size(tree%cc_func_vars)
+             iv = tree%cc_func_vars(n)
+             call tree%cc_methods(iv)%funcval(tree%boxes(id), iv)
           end do
        end do
        !$omp end do
@@ -763,7 +835,7 @@ contains
        !$omp do
        do i = 1, size(ref_info%lvls(lvl)%add)
           id = ref_info%lvls(lvl)%add(i)
-          call af_gc_box(tree, id, [tree%cc_method_vars])
+          call af_gc_box(tree, id, [tree%cc_auto_vars])
        end do
        !$omp end do
     end do
@@ -829,11 +901,7 @@ contains
     integer              :: p_id
     integer              :: thread_id
     integer, allocatable :: tmp_flags(:, :)
-#if NDIM == 2
-    integer              :: cell_flags(tree%n_cell, tree%n_cell)
-#elif NDIM == 3
-    integer              :: cell_flags(tree%n_cell, tree%n_cell, tree%n_cell)
-#endif
+    integer              :: cell_flags(DTIMES(tree%n_cell))
     integer, parameter   :: unset_flag = -huge(1)
 
     ! Set refinement flags for each thread individually, because we sometimes
@@ -990,11 +1058,7 @@ contains
        ref_buffer)
     use m_af_utils, only: af_get_loc
     integer, intent(in)     :: nc                     !< n_cell for the box
-#if NDIM == 2
-    integer, intent(in)     :: cell_flags(nc, nc)     !< Cell refinement flags
-#elif NDIM == 3
-    integer, intent(in)     :: cell_flags(nc, nc, nc) !< Cell refinement flags
-#endif
+    integer, intent(in)     :: cell_flags(DTIMES(nc))     !< Cell refinement flags
     integer, intent(inout)  :: ref_flags(:)           !< Box refinement flags for this thread
     type(af_t), intent(in) :: tree                   !< Full tree
     integer, intent(in)     :: id                     !< Which box is considered
@@ -1038,16 +1102,9 @@ contains
           ix1 = ref_buffer
        end where
 
-#if NDIM == 2
-       if (any(cell_flags(ix0(1):ix1(1), ix0(2):ix1(2)) == af_do_ref)) then
+       if (any(cell_flags(DSLICE(ix0, ix1)) == af_do_ref)) then
           ref_flags(nb_id) = af_do_ref
        end if
-#elif NDIM == 3
-       if (any(cell_flags(ix0(1):ix1(1), ix0(2):ix1(2), &
-            ix0(3):ix1(3)) == af_do_ref)) then
-          ref_flags(nb_id) = af_do_ref
-       end if
-#endif
     end do; CLOSE_DO
 
   end subroutine cell_to_ref_flags
@@ -1073,7 +1130,9 @@ contains
        do KJI_DO(-1,1)
           nb_id = tree%boxes(c_id)%neighbor_mat(IJK)
           if (nb_id > af_no_box) then
-#if NDIM == 2
+#if NDIM == 1
+             tree%boxes(nb_id)%neighbor_mat(-i) = af_no_box
+#elif NDIM == 2
              tree%boxes(nb_id)%neighbor_mat(-i, -j) = af_no_box
 #elif NDIM == 3
              tree%boxes(nb_id)%neighbor_mat(-i, -j, -k) = af_no_box
@@ -1125,13 +1184,8 @@ contains
           child_nb = c_ids(af_child_adj_nb(:, nb)) ! Neighboring children
           boxes(child_nb)%neighbors(nb) = boxes(id)%neighbors(nb)
           dix = af_neighb_dix(:, nb)
-#if NDIM == 2
-          boxes(child_nb)%neighbor_mat(dix(1), dix(2)) = &
+          boxes(child_nb)%neighbor_mat(DINDEX(dix)) = &
                boxes(id)%neighbors(nb)
-#elif NDIM == 3
-          boxes(child_nb)%neighbor_mat(dix(1), dix(2), dix(3)) = &
-               boxes(id)%neighbors(nb)
-#endif
        end if
     end do
   end subroutine add_children
@@ -1193,7 +1247,10 @@ contains
     integer, intent(in)         :: nb        !< Direction in which fluxes are set
     integer, intent(in)         :: f_ixs(:)  !< Indices of the fluxes
     integer                     :: nc, nch, c_id, i_ch, i, ic, d
-    integer                     :: n_chnb, nb_id, i_nb, ioff(NDIM)
+    integer                     :: n_chnb, nb_id, i_nb
+#if NDIM > 1
+    integer                     :: ioff(NDIM)
+#endif
 #if NDIM == 2
     integer                     :: n
     real(dp)                    :: w1, w2
@@ -1215,7 +1272,15 @@ contains
     end if
 
     select case (d)
-#if NDIM == 2
+#if NDIM == 1
+    case (1)
+       do ic = 1, n_chnb
+          ! Get index of child adjacent to neighbor
+          i_ch = af_child_adj_nb(ic, nb)
+          c_id = boxes(id)%children(i_ch)
+          boxes(nb_id)%fc(i_nb, 1, f_ixs) = boxes(c_id)%fc(i, 1, f_ixs)
+       end do
+#elif NDIM == 2
     case (1)
        do ic = 1, n_chnb
           ! Get index of child adjacent to neighbor

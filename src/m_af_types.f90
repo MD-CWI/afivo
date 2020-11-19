@@ -1,3 +1,4 @@
+#include "cpp_macros.h"
 !> This module contains the basic types and constants that are used in the
 !> NDIM-dimensional version of Afivo, together with some basic routines. The
 !> dimension-independent types and constant are place in m_afivo_types.
@@ -62,6 +63,11 @@ module m_af_types
   !> Value to indicate a continuous boundary condition
   integer, parameter :: af_bc_continuous = -12
 
+  !> Value to indicate a Dirichlet boundary condition in which a value is copied
+  !> to the ghost cells, without any type of extrapolation. This can be useful
+  !> for hyperbolic PDEs
+  integer, parameter :: af_bc_dirichlet_copy = -13
+
   !> Maximum length of the names of variables
   integer, parameter :: af_nlen = 20
 
@@ -86,7 +92,41 @@ module m_af_types
      type(ref_lvl_t), allocatable :: lvls(:)   !< Ids of added boxes per level
   end type ref_info_t
 
-#if NDIM == 2
+#if NDIM == 1
+    !> Number of children
+  integer, parameter :: af_num_children = 2
+
+  !> Index offset for each child
+  integer, parameter :: af_child_dix(1, 2) = reshape([0,1], [1,2])
+  !> Children adjacent to a neighbor
+  integer, parameter :: af_child_adj_nb(1, 2) = reshape([1,2], [1,2])
+  !> Which children have a low index per dimension
+  logical, parameter :: af_child_low(1, 2) = reshape([.true., .false.], [1, 2])
+  !> Whether a child located in the 'upper' direction (1 or 0)
+
+  !> Number of neighbors
+  integer, parameter :: af_num_neighbors = 2
+  !> Lower-x neighbor
+  integer, parameter :: af_neighb_lowx = 1
+  !> Upper-x neighbor
+  integer, parameter :: af_neighb_highx = 2
+
+  !> Index offsets of neighbors
+  integer, parameter :: af_neighb_dix(1, 2) = reshape([-1,1], [1,2])
+  !> Which neighbors have a lower index
+  logical, parameter :: af_neighb_low(2) = [.true., .false.]
+  !> The low neighbors
+  integer, parameter :: af_low_neighbs(1) = [1]
+  !> The high neighbors
+  integer, parameter :: af_high_neighbs(1) = [2]
+  !> Opposite of nb_low, but now as -1,1 integers
+  integer, parameter :: af_neighb_high_pm(2) = [-1, 1]
+
+  !> Reverse neighbors
+  integer, parameter :: af_neighb_rev(2) = [2, 1]
+  !> Direction (dimension) for a neighbor
+  integer, parameter :: af_neighb_dim(2) = [1, 1]
+#elif NDIM == 2
   !> Number of children
   integer, parameter :: af_num_children = 4
 
@@ -94,14 +134,9 @@ module m_af_types
   integer, parameter :: af_child_dix(2, 4) = reshape([0,0,1,0,0,1,1,1], [2,4])
   !> Children adjacent to a neighbor
   integer, parameter :: af_child_adj_nb(2, 4) = reshape([1,3,2,4,1,2,3,4], [2,4])
-  !> Neighbors adjacent to a child
-  integer, parameter :: af_nb_adj_child(2, 4) = reshape([1,3,2,3,1,4,2,4], [2,4])
   !> Which children have a low index per dimension
   logical, parameter :: af_child_low(2, 4) = reshape([.true., .true., &
        .false., .true., .true., .false., .false., .false.], [2, 4])
-  !> Whether a child located in the 'upper' direction (1 or 0)
-  integer, parameter :: af_child_high_01(2, 4) = &
-       reshape([0, 0, 1, 0, 0, 1, 1, 1], [2, 4])
 
   !> Number of neighbors
   integer, parameter :: af_num_neighbors = 4
@@ -122,8 +157,6 @@ module m_af_types
   integer, parameter :: af_low_neighbs(2) = [1, 3]
   !> The high neighbors
   integer, parameter :: af_high_neighbs(2) = [2, 4]
-  !> Opposite of nb_low, but now as 0,1 integers
-  integer, parameter :: af_neighb_high_01(4) = [0, 1, 0, 1]
   !> Opposite of nb_low, but now as -1,1 integers
   integer, parameter :: af_neighb_high_pm(4) = [-1, 1, -1, 1]
 
@@ -146,21 +179,12 @@ module m_af_types
   !> Children adjacent to a neighbor
   integer, parameter :: af_child_adj_nb(4, 6) = reshape( &
        [1,3,5,7, 2,4,6,8, 1,2,5,6, 3,4,7,8, 1,2,3,4, 5,6,7,8], [4,6])
-  !> Neighbors adjacent to a child
-  integer, parameter :: af_nb_adj_child(3, 8) = reshape( &
-       [1,3,5, 2,3,5, 1,4,5, 2,4,5, 1,3,6, 2,3,6, 1,4,6, 2,4,6], [3,8])
   !> Which children have a low index per dimension
   logical, parameter :: af_child_low(3, 8) = reshape([ &
        .true., .true., .true., .false., .true., .true., &
        .true., .false., .true., .false., .false., .true., &
        .true., .true., .false., .false., .true., .false., &
        .true., .false., .false., .false., .false., .false.], [3, 8])
-  !> Which children have a high index per dimension
-  integer, parameter :: af_child_high_01(3, 8) = reshape([ &
-       0, 0, 0, 1, 0, 0, &
-       0, 1, 0, 1, 1, 0, &
-       0, 0, 1, 1, 0, 1, &
-       0, 1, 1, 1, 1, 1], [3, 8])
 
   !> Number of neighbors
   integer, parameter :: af_num_neighbors = 6
@@ -186,8 +210,6 @@ module m_af_types
   integer, parameter :: af_low_neighbs(3) = [1, 3, 5]
   !> The high neighbors
   integer, parameter :: af_high_neighbs(3) = [2, 4, 6]
-  !> Opposite of nb_low, but now as 0,1 integers
-  integer, parameter :: af_neighb_high_01(6) = [0, 1, 0, 1, 0, 1]
   !> Opposite of nb_low, but now as -1,1 integers
   integer, parameter :: af_neighb_high_pm(6) = [-1, 1, -1, 1, -1, 1]
   !> Reverse neighbors
@@ -230,6 +252,10 @@ module m_af_types
      procedure(af_subr_bc), pointer, nopass :: bc => null()
      !> Refinement boundary routine
      procedure(af_subr_rb), pointer, nopass :: rb => null()
+     !> Custom boundary condition routine
+     procedure(af_subr_bc_custom), pointer, nopass :: bc_custom => null()
+     !> Function defining the values of this variables
+     procedure(af_subr_funcval), pointer, nopass :: funcval => null()
   end type af_cc_methods
 
   !> The basic building block of afivo: a box with cell-centered and face
@@ -245,22 +271,13 @@ module m_af_types
      !> index of neighbors in box list
      integer               :: neighbors(af_num_neighbors)
      !> matrix with neighbors (including diagonal ones)
-#if NDIM == 2
-     integer               :: neighbor_mat(-1:1, -1:1)
-#elif NDIM == 3
-     integer               :: neighbor_mat(-1:1, -1:1, -1:1)
-#endif
+     integer               :: neighbor_mat(DTIMES(-1:1))
      integer               :: n_cell    !< number of cells per dimension
      real(dp)              :: dr(NDIM)  !< width/height of a cell
      real(dp)              :: r_min(NDIM) !< min coords. of box
      integer               :: coord_t   !< Coordinate type (e.g. Cartesian)
-#if NDIM == 2
-     real(dp), allocatable :: cc(:, :, :) !< cell centered variables
-     real(dp), allocatable :: fc(:, :, :, :) !< face centered variables
-#elif NDIM == 3
-     real(dp), allocatable :: cc(:, :, :, :) !< cell centered variables
-     real(dp), allocatable :: fc(:, :, :, :, :) !< x-face centered variables
-#endif
+     real(dp), allocatable :: cc(DTIMES(:), :) !< cell centered variables
+     real(dp), allocatable :: fc(DTIMES(:), :, :) !< face centered variables
   end type box_t
 
   !> Type which stores all the boxes and levels, as well as some information
@@ -285,9 +302,6 @@ module m_af_types
      !> Names of face-centered variables
      character(len=af_nlen) :: fc_names(af_max_num_vars)
 
-     !> Maximal refinement level for the variables
-     integer :: cc_max_level(af_max_num_vars) = af_max_lvl
-
      !> Number of copies of the variable (for e.g. time-stepping)
      integer :: cc_num_copies(af_max_num_vars) = 1
 
@@ -307,7 +321,10 @@ module m_af_types
      logical :: has_cc_method(af_max_num_vars) = .false.
 
      !> Indices of cell-centered variables with methods
-     integer, allocatable :: cc_method_vars(:)
+     integer, allocatable :: cc_auto_vars(:)
+
+     !> Indices of cell-centered variables defined by a function
+     integer, allocatable :: cc_func_vars(:)
 
      !> List storing the tree levels
      type(lvl_t) :: lvls(af_min_lvl:af_max_lvl)
@@ -335,12 +352,7 @@ module m_af_types
        import
        type(box_t), intent(in) :: box !< Box to inspect
        !> Cell refinement flags
-#if NDIM == 2
-       integer, intent(out)      :: cell_flags(box%n_cell, box%n_cell)
-#elif NDIM == 3
-       integer, intent(out)      :: cell_flags(box%n_cell, &
-            box%n_cell, box%n_cell)
-#endif
+       integer, intent(out)      :: cell_flags(DTIMES(box%n_cell))
      end subroutine af_subr_ref
 
      !> Subroutine that gets a box
@@ -406,20 +418,28 @@ module m_af_types
        integer, intent(out)    :: bc_type !< Type of b.c.
      end subroutine af_subr_bc
 
-     !> Subroutine for getting extra ghost cell data (> 1) near physical boundaries
-     subroutine af_subr_egc(boxes, id, nb, iv, gc_data, nc)
+     !> To fill ghost cells near physical boundaries in a custom way. If the
+     !> number of ghost cells to fill is greater than one (n_gc > 1), fill ghost
+     !> cells in the optional argument cc.
+     subroutine af_subr_bc_custom(box, nb, iv, n_gc, cc)
        import
-       type(box_t), intent(inout) :: boxes(:) !< Array with all boxes
-       integer, intent(in)         :: id       !< Id of the box that needs to have ghost cells filled
-       integer, intent(in)         :: nb       !< Neighbor direction
-       integer, intent(in)         :: iv       !< Variable for which ghost cells are filled
-       integer, intent(in)         :: nc       !< box%n_cell (this is purely for convenience)
-#if NDIM == 2
-       real(dp), intent(out)       :: gc_data(nc) !< The requested ghost cells
-#elif NDIM == 3
-       real(dp), intent(out)       :: gc_data(nc, nc) !< The requested ghost cells
-#endif
-     end subroutine af_subr_egc
+       type(box_t), intent(inout) :: box     !< Box that needs b.c.
+       integer, intent(in)     :: nb      !< Direction
+       integer, intent(in)     :: iv      !< Index of variable
+       integer, intent(in)     :: n_gc !< Number of ghost cells to fill
+       !> If n_gc > 1, fill ghost cell values in this array instead of box%cc
+       real(dp), intent(inout), optional :: &
+            cc(DTIMES(1-n_gc:box%n_cell+n_gc))
+     end subroutine af_subr_bc_custom
+
+     !> To set cell-centered variables based on a user-defined function. This
+     !> can be useful to avoid recomputing values. The values should also be set
+     !> in ghost cells.
+     subroutine af_subr_funcval(box, iv)
+       import
+       type(box_t), intent(inout) :: box !< Box to fill values in
+       integer, intent(in)        :: iv  !< Index of variable
+     end subroutine af_subr_funcval
 
      !> Subroutine for prolongation
      subroutine af_subr_prolong(box_p, box_c, iv, iv_to, add)
@@ -432,12 +452,11 @@ module m_af_types
      end subroutine af_subr_prolong
 
      !> Subroutine for restriction
-     subroutine af_subr_restrict(box_c, box_p, iv, iv_to, use_geometry)
+     subroutine af_subr_restrict(box_c, box_p, ivs, use_geometry)
        import
-       type(box_t), intent(in)     :: box_c !< Child box to restrict
-       type(box_t), intent(inout)  :: box_p !< Parent box to restrict to
-       integer, intent(in)           :: iv    !< Variable to restrict
-       integer, intent(in), optional :: iv_to !< Destination (if /= iv)
+       type(box_t), intent(in)       :: box_c        !< Child box to restrict
+       type(box_t), intent(inout)    :: box_p        !< Parent box to restrict to
+       integer, intent(in)           :: ivs(:)       !< Variables to restrict
        logical, intent(in), optional :: use_geometry !< If set to false, don't use geometry
      end subroutine af_subr_restrict
   end interface
@@ -453,6 +472,7 @@ contains
   !> Get tree info
   subroutine af_print_info(tree)
     type(af_t), intent(in) :: tree !< The tree
+    character(len=15) :: fmt_string
 
     if (.not. allocated(tree%boxes)) then
        print *, "af_init has not been called for this tree"
@@ -475,13 +495,9 @@ contains
        write(*, "(A,I10)") " Number of fc variables: ", tree%n_var_face
        write(*, "(A,A15)") " Type of coordinates:    ", &
             af_coord_names(tree%coord_t)
-#if NDIM == 2
-       write(*, "(A,2E10.2)") " min. coords:            ", tree%r_base
-       write(*, "(A,2E10.2)") " dr at level one:        ", tree%dr_base
-#elif NDIM == 3
-       write(*, "(A,3E10.2)") " min. coords:            ", tree%r_base
-       write(*, "(A,3E10.2)") " dr at level one:        ", tree%dr_base
-#endif
+       write(fmt_string, "(A,I0,A)") "(A,", NDIM, "E10.2)"
+       write(*, fmt_string) " min. coords:            ", tree%r_base
+       write(*, fmt_string) " dr at level one:        ", tree%dr_base
        write(*, "(A,E10.2)") " minval(dr):             ", af_min_dr(tree)
        write(*, "(A)") ""
     end if
@@ -535,13 +551,13 @@ contains
 
     box_len = tree%n_cell * tree%dr_base
 
-    if (tree%coord_t == af_cyl) then
+    if (NDIM == 2 .and. tree%coord_t == af_cyl) then
        vol     = 0.0_dp
        do i = 1, size(tree%lvls(1)%ids)
           id  = tree%lvls(1)%ids(i)
           r0  = tree%boxes(id)%r_min(1)
           r1  = r0 + box_len(1)
-          vol = vol + pi * (r1**2 - r0**2) * box_len(2)
+          vol = vol + pi * (r1**2 - r0**2) * box_len(NDIM)
        end do
     else
        vol = size(tree%lvls(1)%ids) * product(box_len)
@@ -715,7 +731,9 @@ contains
   pure integer function af_ix_to_ichild(ix)
     integer, intent(in) :: ix(NDIM) !< Spatial index of the box
     ! The index can range from 1 (all ix odd) and 2**NDIM (all ix even)
-#if NDIM == 2
+#if NDIM == 1
+    af_ix_to_ichild = 2 - iand(ix(1), 1)
+#elif NDIM == 2
     af_ix_to_ichild = 4 - 2 * iand(ix(2), 1) - iand(ix(1), 1)
 #elif NDIM == 3
     af_ix_to_ichild = &
@@ -785,7 +803,9 @@ contains
     integer, intent(in)         :: nb        !< Ghost cell direction
     integer, intent(in)         :: iv        !< Ghost cell variable
     real(dp), optional, intent(in) :: gc_scalar !< Scalar value for ghost cells
-#if NDIM == 2
+#if NDIM == 1
+    real(dp), optional, intent(in) :: gc_array(1) !< Array for ghost cells
+#elif NDIM == 2
     real(dp), optional, intent(in) :: gc_array(box%n_cell) !< Array for ghost cells
 #elif NDIM == 3
     !> Array for ghost cells
@@ -797,7 +817,12 @@ contains
 
     if (present(gc_array)) then
        select case (nb)
-#if NDIM == 2
+#if NDIM == 1
+       case (af_neighb_lowx)
+          box%cc(0, iv)    = gc_array(1)
+       case (af_neighb_highx)
+          box%cc(nc+1, iv) = gc_array(1)
+#elif NDIM == 2
        case (af_neighb_lowx)
           box%cc(0, 1:nc, iv)    = gc_array
        case (af_neighb_highx)
@@ -823,7 +848,12 @@ contains
        end select
     else if (present(gc_scalar)) then
        select case (nb)
-#if NDIM == 2
+#if NDIM == 1
+       case (af_neighb_lowx)
+          box%cc(0, iv)    = gc_scalar
+       case (af_neighb_highx)
+          box%cc(nc+1, iv) = gc_scalar
+#elif NDIM == 2
        case (af_neighb_lowx)
           box%cc(0, 1:nc, iv)    = gc_scalar
        case (af_neighb_highx)
