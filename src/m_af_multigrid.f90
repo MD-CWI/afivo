@@ -83,20 +83,12 @@ contains
     if (mg%n_cycle_up < 0)             mg%n_cycle_up = 2
 
     ! Check whether methods are set, otherwise use default (for laplacian)
-    if (.not. associated(mg%sides_rb)) then
-       if (mg%i_eps > 0) then
-          ! With a dielectric, use local extrapolation for ghost cells
-          mg%sides_rb => mg_sides_rb_extrap
-       else
-          mg%sides_rb => mg_sides_rb
-       end if
-    end if
-
     if (.not. associated(mg%box_op)) mg%box_op => mg_auto_op
     if (.not. associated(mg%box_stencil)) mg%box_stencil => mg_auto_stencil
     if (.not. associated(mg%box_gsrb)) mg%box_gsrb => mg_auto_gsrb
     if (.not. associated(mg%box_corr)) mg%box_corr => mg_auto_corr
     if (.not. associated(mg%box_rstr)) mg%box_rstr => mg_auto_rstr
+    if (.not. associated(mg%sides_rb)) mg%sides_rb => mg_auto_rb
 
     if (mg%i_lsf /= -1) then
        call check_coarse_representation_lsf(tree, mg)
@@ -166,6 +158,7 @@ contains
        call mg_fas_vcycle(tree, mg, &
             set_residual .and. lvl == tree%highest_lvl, lvl, standalone=.false.)
     end do
+
   end subroutine mg_fas_fmg
 
   !> Perform FAS V-cycle (full approximation scheme). Note that this routine
@@ -183,10 +176,12 @@ contains
     logical                       :: by_itself
     real(dp)                      :: sum_phi, mean_phi
 
-    call check_mg(mg)           ! Check whether mg options are set
-
     by_itself = .true.; if (present(standalone)) by_itself = standalone
-    if (by_itself) call mg_set_box_tag_tree(tree, mg)
+
+    if (by_itself) then
+       call check_mg(mg)        ! Check whether mg options are set
+       call mg_set_box_tag_tree(tree, mg)
+    end if
 
     max_lvl = tree%highest_lvl
     if (present(highest_lvl)) max_lvl = highest_lvl
@@ -649,7 +644,7 @@ contains
 
        !$omp do
        do i = 1, size(ids)
-          call af_gc_box(tree, ids(i), [mg%i_phi])
+          call af_gc_box(tree, ids(i), [mg%i_phi], use_corners)
        end do
        !$omp end do
     end do
@@ -908,6 +903,31 @@ contains
        error stop "mg_auto_rstr: unknown box tag"
     end select
   end subroutine mg_auto_rstr
+
+  !> Set ghost cells near refinement boundaries
+  subroutine mg_auto_rb(boxes, id, nb, iv)
+    type(box_t), intent(inout) :: boxes(:) !< List of all boxes
+    integer, intent(in)        :: id     !< Id of box
+    integer, intent(in)        :: nb     !< Ghost cell direction
+    integer, intent(in)        :: iv     !< Ghost cell variable
+
+    select case(boxes(id)%tag)
+    case (mg_normal_box)
+       call mg_sides_rb(boxes, id, nb, iv)
+    case (mg_veps_box, mg_ceps_box)
+       ! With a dielectric, use local extrapolation for ghost cells
+       call mg_sides_rb_extrap(boxes, id, nb, iv)
+    case (mg_lsf_box)
+       call mg_sides_rb(boxes, id, nb, iv)
+    case (af_init_tag)
+       ! Use default method; this is useful for initial refinement when box tags
+       ! are not yet set
+       call mg_sides_rb(boxes, id, nb, iv)
+    case default
+       error stop "mg_auto_rb: unknown box tag"
+    end select
+
+  end subroutine mg_auto_rb
 
   !> Based on the box type, correct the solution of the children
   subroutine mg_auto_corr(box_p, box_c, mg)
@@ -2211,23 +2231,41 @@ contains
     type(mg_t), intent(in)     :: mg
     integer, intent(in)        :: i_fc !< Face-centered indices
     real(dp), intent(in)       :: fac  !< Multiply with this factor
+    real(dp)                   :: cc(DTIMES(0:box%n_cell+1), 2)
     integer                    :: IJK, nc, i_phi, i_lsf
     real(dp)                   :: dd, val, v_a(2), v_b(2)
-    integer                    :: grad_sign
+    integer                    :: grad_sign, nb
+    integer                    :: ilo(NDIM), ihi(NDIM)
+    integer                    :: olo(NDIM), ohi(NDIM)
 
     nc     = box%n_cell
     i_phi  = mg%i_phi
     i_lsf  = mg%i_lsf
 
+    ! Store a copy because we might need to modify phi in ghost cells
+    cc = box%cc(DTIMES(:), [i_lsf, i_phi])
+
+    do nb = 1, af_num_neighbors
+       ! If lsf value changes sign in ghost cell, use boundary value
+       if (box%neighbors(nb) == af_no_box) then
+          call af_get_index_bc_inside(nb, box%n_cell, 1, ilo, ihi)
+          call af_get_index_bc_outside(nb, box%n_cell, 1, olo, ohi)
+          where (cc(DSLICE(ilo,ihi), 1) * &
+               cc(DSLICE(olo,ohi), 1) <= 0.0_dp)
+             cc(DSLICE(olo,ohi), 2) = mg%lsf_boundary_value
+          end where
+       end if
+    end do
+
 #if NDIM == 1
     do i = 1, nc+1
-       if (box%cc(i, i_lsf) > 0) then
-          v_a = box%cc(i, [i_lsf, i_phi])
-          v_b = box%cc(i-1, [i_lsf, i_phi])
+       if (cc(i, 1) > 0) then
+          v_a = cc(i, :)
+          v_b = cc(i-1, :)
           grad_sign = 1
        else
-          v_a = box%cc(i-1, [i_lsf, i_phi])
-          v_b = box%cc(i, [i_lsf, i_phi])
+          v_a = cc(i-1, :)
+          v_b = cc(i, :)
           grad_sign = -1
        end if
 
@@ -2239,13 +2277,13 @@ contains
 #elif NDIM == 2
     do j = 1, nc
        do i = 1, nc+1
-          if (box%cc(i, j, i_lsf) > 0) then
-             v_a = box%cc(i, j, [i_lsf, i_phi])
-             v_b = box%cc(i-1, j, [i_lsf, i_phi])
+          if (cc(i, j, 1) > 0) then
+             v_a = cc(i, j, :)
+             v_b = cc(i-1, j, :)
              grad_sign = 1
           else
-             v_a = box%cc(i-1, j, [i_lsf, i_phi])
-             v_b = box%cc(i, j, [i_lsf, i_phi])
+             v_a = cc(i-1, j, :)
+             v_b = cc(i, j, :)
              grad_sign = -1
           end if
 
@@ -2254,13 +2292,13 @@ contains
           box%fc(IJK, 1, i_fc) = grad_sign * fac * (v_a(2) - val) / &
                (box%dr(1) * dd)
 
-          if (box%cc(j, i, i_lsf) > 0) then
-             v_a = box%cc(j, i, [i_lsf, i_phi])
-             v_b = box%cc(j, i-1, [i_lsf, i_phi])
+          if (cc(j, i, 1) > 0) then
+             v_a = cc(j, i, :)
+             v_b = cc(j, i-1, :)
              grad_sign = 1
           else
-             v_a = box%cc(j, i-1, [i_lsf, i_phi])
-             v_b = box%cc(j, i, [i_lsf, i_phi])
+             v_a = cc(j, i-1, :)
+             v_b = cc(j, i, :)
              grad_sign = -1
           end if
 
@@ -2274,13 +2312,13 @@ contains
     do k = 1, nc
        do j = 1, nc
           do i = 1, nc+1
-             if (box%cc(i, j, k, i_lsf) > 0) then
-                v_a = box%cc(i, j, k, [i_lsf, i_phi])
-                v_b = box%cc(i-1, j, k, [i_lsf, i_phi])
+             if (cc(i, j, k, 1) > 0) then
+                v_a = cc(i, j, k, :)
+                v_b = cc(i-1, j, k, :)
                 grad_sign = 1
              else
-                v_a = box%cc(i-1, j, k, [i_lsf, i_phi])
-                v_b = box%cc(i, j, k, [i_lsf, i_phi])
+                v_a = cc(i-1, j, k, :)
+                v_b = cc(i, j, k, :)
                 grad_sign = -1
              end if
 
@@ -2289,13 +2327,13 @@ contains
              box%fc(IJK, 1, i_fc) = grad_sign * fac * (v_a(2) - val) / &
                   (box%dr(1) * dd)
 
-             if (box%cc(j, i, k, i_lsf) > 0) then
-                v_a = box%cc(j, i, k, [i_lsf, i_phi])
-                v_b = box%cc(j, i-1, k, [i_lsf, i_phi])
+             if (cc(j, i, k, 1) > 0) then
+                v_a = cc(j, i, k, :)
+                v_b = cc(j, i-1, k, :)
                 grad_sign = 1
              else
-                v_a = box%cc(j, i-1, k, [i_lsf, i_phi])
-                v_b = box%cc(j, i, k, [i_lsf, i_phi])
+                v_a = cc(j, i-1, k, :)
+                v_b = cc(j, i, k, :)
                 grad_sign = -1
              end if
 
@@ -2304,13 +2342,13 @@ contains
              box%fc(j, i, k, 2, i_fc) = grad_sign * fac * (v_a(2) - val) / &
                   (box%dr(2) * dd)
 
-             if (box%cc(j, k, i, i_lsf) > 0) then
-                v_a = box%cc(j, k, i, [i_lsf, i_phi])
-                v_b = box%cc(j, k, i-1, [i_lsf, i_phi])
+             if (cc(j, k, i, 1) > 0) then
+                v_a = cc(j, k, i, :)
+                v_b = cc(j, k, i-1, :)
                 grad_sign = 1
              else
-                v_a = box%cc(j, k, i-1, [i_lsf, i_phi])
-                v_b = box%cc(j, k, i, [i_lsf, i_phi])
+                v_a = cc(j, k, i-1, :)
+                v_b = cc(j, k, i, :)
                 grad_sign = -1
              end if
 
