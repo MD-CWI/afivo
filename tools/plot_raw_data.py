@@ -54,7 +54,7 @@ def get_uniform_data(grids, domain, min_pixels, interpolation='linear',
                      rmin=None, rmax=None, axisymmetric=False,
                      abel_transform=False, quiet=False):
     # Grid size nx should be of form 2^k * domain['n_cells_coarse']
-    ratio = min_pixels / domain['n_cells_coarse'].min()
+    ratio = max(1.0, min_pixels / domain['n_cells_coarse'].min())
     ratio = 2**(np.ceil(np.log2(ratio)).astype(int))
     nx = domain['n_cells_coarse'] * ratio
 
