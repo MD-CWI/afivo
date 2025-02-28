@@ -1542,6 +1542,9 @@ contains
     real(dp)                   :: dd(2*NDIM)
     real(dp), allocatable      :: all_distances(:, DTIMES(:))
     logical                    :: success
+#if NDIM == 2
+    real(dp)                   :: tmp
+#endif
 
     nc               = box%n_cell
     idr2(1:2*NDIM:2) = 1/box%dr**2
@@ -1550,10 +1553,8 @@ contains
 
     box%stencils(ix)%shape = af_stencil_357
     box%stencils(ix)%stype = stencil_variable
-    ! A custom correction for cylindrical geometry could be more accurate. This
-    ! would require the derivation of a discretization for cells in which both
-    ! epsilon changes and a boundary is present.
-    box%stencils(ix)%cylindrical_gradient = (box%coord_t == af_cyl)
+    ! Perform a custom correction in cylindrical coordinates
+    box%stencils(ix)%cylindrical_gradient = .false.
     call af_stencil_allocate_coeff(box%stencils(ix), box%n_cell, use_f=.true.)
     allocate(all_distances(2*NDIM, DTIMES(nc)))
 
@@ -1604,6 +1605,16 @@ contains
 
          box%stencils(ix)%v(2:, IJK) = box%stencils(ix)%v(2:, IJK) * &
               2 * a0*a(:)/(a0 + a(:))
+
+#if NDIM == 2
+       if (box%coord_t == af_cyl) then
+          ! Add correction for cylindrical coordinate system. This is a
+          ! discretization of eps/r * d/dr phi
+          tmp = a0/(box%dr(1) * (dd(1) + dd(2)) * af_cyl_radius_cc(box, i))
+          box%stencils(ix)%v(2, IJK) = box%stencils(ix)%v(2, IJK) - tmp
+          box%stencils(ix)%v(3, IJK) = box%stencils(ix)%v(3, IJK) + tmp
+       end if
+#endif
 
          box%stencils(ix)%v(1, IJK) = -sum(box%stencils(ix)%v(2:, IJK))
 
