@@ -296,10 +296,6 @@ contains
     ! x0 = x1 +/- dx * b = c0 * b + c1 * x1
     ! x-1 = x2 +/- 3 * dx * b = c2 * b + c1 * x2
     !
-    ! The second ghost cell here is a copy of the first one, this might not
-    ! always be ideal, but it ensures the af_bc_dirichlet_copy variant does not
-    ! introduce negative values
-    !
     ! Below, we set coefficients to handle these cases
     select case (bc_type)
     case (af_bc_dirichlet)
