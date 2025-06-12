@@ -15,7 +15,7 @@ import pathlib
 
 
 def load_file(fname, project_dims=None, axisymmetric=False,
-              variable=None, silo_to_raw=None):
+              variable=None, silo_to_raw=None, max_along_dims=None):
     """Read a Silo or a raw file
 
     :param fname: name of the raw file
@@ -23,6 +23,7 @@ def load_file(fname, project_dims=None, axisymmetric=False,
     :param axisymmetric: bool, whether the data is axisymmetric
     :param variable: read this variable from a Silo file
     :param silo_to_raw: path to silo_to_raw executable
+    :param max_along_dims: extract maximum along these dimensions
     :returns: grids, domains
     """
     extension = os.path.splitext(fname)[1]
@@ -44,9 +45,11 @@ def load_file(fname, project_dims=None, axisymmetric=False,
         with tempfile.NamedTemporaryFile(dir=dirname) as fp:
             _ = subprocess.call([silo_to_raw, fname,
                                  variable, fp.name])
-            grids, domain = get_raw_data(fp.name, project_dims, axisymmetric)
+            grids, domain = get_raw_data(fp.name, project_dims, axisymmetric,
+                                         max_along_dims)
     else:
-        grids, domain = get_raw_data(fname, project_dims)
+        grids, domain = get_raw_data(fname, project_dims, axisymmetric,
+                                     max_along_dims)
 
     return grids, domain
 
@@ -91,11 +94,13 @@ def read_single_grid(f):
     return grid
 
 
-def get_raw_data(fname, project_dims=None, axisymmetric=False):
+def get_raw_data(fname, project_dims=None, axisymmetric=False,
+                 max_along_dims=None):
     """Read raw data extracted from a Silo file
 
     :param fname: filename of raw data
     :param project_dims: int, integrate over these dimensions
+    :param max_along_dims: int, determine maximum these dimensions
     :param axisymmetric: bool, whether the data is axisymmetric
     :returns: grids and domain properties
 
@@ -116,6 +121,9 @@ def get_raw_data(fname, project_dims=None, axisymmetric=False):
 
             if project_dims is not None:
                 grid = grid_project(grid, project_dims, axisymmetric)
+
+            if max_along_dims is not None:
+                grid = grid_max_along_dims(grid, max_along_dims)
 
             grids.append(grid)
 
@@ -244,6 +252,40 @@ def grid_project(in_grid, project_dims, axisymmetric):
     g['dr'] = np.delete(g['dr'], pdims)
 
     for d in pdims[::-1]:       # Reverse order
+        del g['coords'][d]
+        del g['coords_cc'][d]
+
+    return g
+
+
+def grid_max_along_dims(in_grid, max_along_dims):
+    """Determine maximum of grid data along one or more dimensions"""
+    g = copy.deepcopy(in_grid)
+
+    dims = np.sort(max_along_dims)
+
+    # Index range to use for values below. Along the reduced dimensions,
+    # exclude ghost cells.
+    ilo = 0 * g['dims']
+    ihi = 1 * g['dims'] - 1     # number of faces - 1
+    ilo[dims] = g['ilo'][dims]
+    ihi[dims] = g['ihi'][dims]
+
+    # Get index range corresponding to non-ghost grid cells
+    valid_ix = tuple([np.s_[i:j] for (i, j) in zip(ilo, ihi)])
+
+    # Take maximum along projected dimensions
+    g['values'] = g['values'][valid_ix].max(axis=tuple(dims))
+
+    g['n_dims'] -= len(max_along_dims)
+    g['dims'] = np.delete(g['dims'], dims)
+    g['ilo'] = np.delete(g['ilo'], dims)
+    g['ihi'] = np.delete(g['ihi'], dims)
+    g['r_min'] = np.delete(g['r_min'], dims)
+    g['r_max'] = np.delete(g['r_max'], dims)
+    g['dr'] = np.delete(g['dr'], dims)
+
+    for d in dims[::-1]:       # Reverse order
         del g['coords'][d]
         del g['coords_cc'][d]
 

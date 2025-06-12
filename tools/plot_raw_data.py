@@ -18,8 +18,11 @@ p.add_argument('input_file', type=str, help='Input silo or raw file')
 p.add_argument('-variable', type=str, help='Which variable to plot')
 p.add_argument('-min_pixels', type=int, default=512,
                help='Min. pixels for any dimension')
-p.add_argument('-project_dims', type=int, nargs='+', choices=[0, 1, 2],
+g = p.add_mutually_exclusive_group()
+g.add_argument('-project_dims', type=int, nargs='+', choices=[0, 1, 2],
                help='Project (integrate) along dimension(s)')
+g.add_argument('-max_along_dims', type=int, nargs='+', choices=[0, 1, 2],
+               help='Extract maximum along dimension(s)')
 p.add_argument('-r_min', type=float, nargs='+',
                help='Only consider data above this coordinate')
 p.add_argument('-r_max', type=float, nargs='+',
@@ -52,7 +55,7 @@ p.add_argument('-q', action='store_true',
 
 def get_uniform_data(grids, domain, min_pixels, interpolation='linear',
                      rmin=None, rmax=None, axisymmetric=False,
-                     abel_transform=False, quiet=False):
+                     abel_transform=False, quiet=False, reduce_max=False):
     # Grid size nx should be of form 2^k * domain['n_cells_coarse']
     ratio = max(1.0, min_pixels / domain['n_cells_coarse'].min())
     ratio = 2**(np.ceil(np.log2(ratio)).astype(int))
@@ -90,7 +93,10 @@ def get_uniform_data(grids, domain, min_pixels, interpolation='linear',
             g, r_min, r_max, dr, axisymmetric, interpolation)
 
         g_ix = tuple([np.s_[i:j] for (i, j) in zip(ix_lo, ix_hi)])
-        uniform_data[g_ix] += grid_data
+        if reduce_max:
+            uniform_data[g_ix] = np.maximum(uniform_data[g_ix], grid_data)
+        else:
+            uniform_data[g_ix] += grid_data
 
     if abel_transform:
         from abel.hansenlaw import hansenlaw_transform
@@ -146,19 +152,24 @@ if __name__ == '__main__':
 
     grids, domain = load_file(args.input_file, args.project_dims,
                               args.axisymmetric, args.variable,
-                              args.silo_to_raw)
+                              args.silo_to_raw, args.max_along_dims)
 
-    # No longer axisymmetric if projected
+    # No longer axisymmetric if first dimension has been removed
     axisymmetric = args.axisymmetric
     if args.project_dims is not None and 0 in args.project_dims:
         axisymmetric = False
+    if args.max_along_dims is not None and 0 in args.max_along_dims:
+        axisymmetric = False
+
+    reduce_max = (args.max_along_dims is not None)
 
     if domain['n_dims'] > 0:
         values, coords = get_uniform_data(grids, domain, args.min_pixels,
                                           args.interpolation,
                                           args.r_min, args.r_max,
                                           axisymmetric,
-                                          args.abel_transform, args.q)
+                                          args.abel_transform, args.q,
+                                          reduce_max)
 
         if args.save_npz:
             # Save data
@@ -172,6 +183,9 @@ if __name__ == '__main__':
                               save_plot=args.save_plot,
                               variable=args.variable)
     else:
-        # All spatial dimensions are projected, only print time and sum
+        # All spatial dimensions are removed, only print time and value
         grid_values = np.array([g['values'] for g in grids])
-        print(f'{domain["time"]:<16.8e} {grid_values.sum():<16.8e}')
+        if reduce_max:
+            print(f'{domain["time"]:<16.8e} {grid_values.max():<16.8e}')
+        else:
+            print(f'{domain["time"]:<16.8e} {grid_values.sum():<16.8e}')
