@@ -13,6 +13,7 @@ program ghostcell_benchmark
   type(ref_info_t)   :: ref_info
   integer            :: n_args
   integer            :: n_cell, it, n_iterations, max_ref_lvl
+  integer            :: n_ghostcells
   real(dp)           :: time
   character(len=100) :: arg_string
   integer            :: count_rate, t_start, t_end
@@ -93,6 +94,10 @@ program ghostcell_benchmark
        " Wall-clock time after ", n_iterations, &
        " iterations: ", time, " seconds"
   write(*, "(A,E10.3,A)") " Per iteration: ", time/n_iterations, " seconds"
+
+  n_ghostcells = af_num_boxes_used(tree) * NDIM * 2 * tree%n_cell
+  write(*, "(A,E10.3,A)") " Ghostcells/ns: ", &
+       n_ghostcells * (n_iterations/time) * 1e-9_dp
 
 contains
 
