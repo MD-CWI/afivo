@@ -2,8 +2,8 @@
 
 # Set names/directories
 target_dir=`pwd`"/hypre"
-hypre_tarname="hypre-2.31.0.tar.gz"
-hypre_dirname="hypre-2.31.0"
+hypre_tarname="hypre-3.1.0.tar.gz"
+hypre_dirname="hypre-3.1.0"
 build_dir="build"
 
 # Do compilation etc. in build directory
