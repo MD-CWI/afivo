@@ -1,10 +1,15 @@
 # Disable built in rules
 .SUFFIXES:
 
-COMPILER = h5fc
+COMPILER = gfortran
 
-ifeq ($(COMPILER), h5fc)
-	FC := h5fc
+# HDF5 flags via pkg-config
+HDF5_PKG    ?= hdf5-serial
+HDF5_CFLAGS := $(shell pkg-config --cflags $(HDF5_PKG))
+HDF5_LIBS   := $(shell pkg-config --libs $(HDF5_PKG))
+
+ifeq ($(COMPILER), gfortran)
+	FC := gfortran
 	FFLAGS := -O2 -g -std=f2008 -fopenmp -Wall -Wextra -Wimplicit-interface	\
 	-Wshadow -Wno-unused-dummy-argument -cpp -fPIC
 	ifeq ($(DEBUG), 1)
@@ -26,6 +31,7 @@ else ifeq ($(PROF), gperftools)
   LIBS += profiler
 endif
 
+FFLAGS += $(HDF5_CFLAGS)
 FFLAGS += $(USR_FLAGS)
 
 # How to get .o object files from .f90 source files
@@ -39,4 +45,4 @@ FFLAGS += $(USR_FLAGS)
 
 # How to get executables from .o object files
 %: %.o
-	$(FC) -o $@ $^ $(FFLAGS) $(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS))
+	$(FC) -o $@ $^ $(FFLAGS) $(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS)) $(HDF5_LIBS)

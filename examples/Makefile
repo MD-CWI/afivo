@@ -72,13 +72,13 @@ $(PROGS_3D): FFLAGS += -DNDIM=3
 # How to create executables
 %_1d: %.f90
 	$(FC) -o $@ $^ $(FFLAGS) $(addprefix -I,$(INCDIRS)) \
-	$(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS))
+	$(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS)) $(HDF5_LIBS)
 %_2d: %.f90
 	$(FC) -o $@ $^ $(FFLAGS) $(addprefix -I,$(INCDIRS)) \
-	$(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS))
+	$(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS)) $(HDF5_LIBS)
 %_3d: %.f90
 	$(FC) -o $@ $^ $(FFLAGS) $(addprefix -I,$(INCDIRS)) \
-	$(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS))
+	$(addprefix -L,$(LIBDIRS)) $(addprefix -l,$(LIBS)) $(HDF5_LIBS)
 
 # Some Poisson programs and objects depend on m_gaussians and m_config
 PROGS_POIS	:= $(filter poisson_%, $(PROGS))
