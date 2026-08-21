@@ -1,6 +1,6 @@
 AF_DIR  := ..
 LIBDIRS := $(AF_DIR)/external_libraries/silo/lib $(AF_DIR)/external_libraries/hypre/lib
-LIBS	:= afivo silo HYPRE
+LIBS	:= afivo siloh5 HYPRE
 OUTDIR	:= output
 
 include $(AF_DIR)/src/makerules.make
@@ -13,7 +13,7 @@ PROGS_XD := random_refinement poisson_basic poisson_benchmark advection		\
  poisson_dielectric poisson_helmholtz reaction_diffusion electrode_example	\
  poisson_lsf_test stencil_test poisson_stencil dielectric_surface		\
  time_integration helmholtz_variable_stencil check_ghostcells			\
- check_prolongation test_refinement_buffer
+ check_prolongation test_refinement_buffer benchmark_silo
 
 PROGS_1D := $(PROGS_XD:%=%_1d)
 

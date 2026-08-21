@@ -1,6 +1,6 @@
 AF_DIR  := ..
 LIBDIRS := $(AF_DIR)/external_libraries/silo/lib
-LIBS	:= afivo silo
+LIBS	:= afivo siloh5
 
 include $(AF_DIR)/src/makerules.make
 

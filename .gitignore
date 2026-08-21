@@ -76,3 +76,4 @@ tests/results/*
 /examples/check_prolongation_?d
 /examples/compressible_flow_wall_2d
 /examples/test_refinement_buffer_?d
+/examples/benchmark_silo_?d

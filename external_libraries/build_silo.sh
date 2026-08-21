@@ -1,35 +1,33 @@
 #!/usr/bin/env bash
 
+set -e
+
 # Set names/directories
 TARGET_DIR=`pwd`"/silo"
-SILO_BASEURL="https://wci.llnl.gov/content/assets/docs/simulation/"\
-"computer-codes/silo/silo-4.10.2/"
-SILO_TARNAME="silo-4.10.2-bsd-smalltest.tar.gz"
-SILO_DIRNAME="silo-4.10.2-bsd"
+SILO_TARNAME="Silo-4.12.1.tar.gz"
+SILO_DIRNAME="Silo-4.12.1"
 BUILD_DIR="build"
 
 # Do compilation etc. in build directory
 mkdir -p ${BUILD_DIR}
 cd ${BUILD_DIR}
 
-# Get silo if not found
-if [ ! -f ${SILO_TARNAME} ]; then
-    if hash curl 2> /dev/null; then
-        curl -O -L ${SILO_BASEURL}${SILO_TARNAME}
-    else
-        echo "build_silo.sh error: cannot find curl"
-    fi
-fi
-
 # Extract
 if [ ! -d ${SILO_DIRNAME} ]; then
     tar -xzf ${SILO_TARNAME}
 fi
 
-# Configure
-cd ${SILO_DIRNAME}
-./configure --disable-shared --disable-fpzip --disable-hzip --disable-silex \
-    --disable-browser --disable-dependency-tracking --enable-optimization \
-    --disable-libtool-lock --prefix=${TARGET_DIR} --without-hdf5
-make
-make install
+# Configure with CMake (out-of-source build)
+cmake -S ${SILO_DIRNAME} -B ${SILO_DIRNAME}/cmake-build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=${TARGET_DIR} \
+    -DSILO_ENABLE_SHARED=OFF \
+    -DSILO_ENABLE_HDF5=ON \
+    -DSILO_ENABLE_BROWSER=OFF \
+    -DSILO_ENABLE_SILEX=OFF \
+    -DSILO_ENABLE_FORTRAN=ON \
+    -DBUILD_TESTING=OFF
+
+# Build and install
+cmake --build ${SILO_DIRNAME}/cmake-build --parallel
+cmake --install ${SILO_DIRNAME}/cmake-build

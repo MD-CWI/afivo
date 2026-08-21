@@ -8,6 +8,7 @@ module m_af_output
   private
 
   integer, parameter :: af_dat_file_version = 3
+  integer, parameter :: blocks_per_dir = 256
 
   abstract interface
      subroutine subr_add_vars(box, new_vars, n_var)
@@ -1023,12 +1024,14 @@ contains
     character(len=100), allocatable :: grid_list(:), grid_list_block(:)
     character(len=100), allocatable :: var_list(:, :), var_names(:)
     character(len=400)              :: fname
+    character(len=40)               :: dirname
     integer                         :: lvl, i, id, i_grid, iv, nc, n_grids_max
     integer                         :: n_cc, n_add, dbix, highest_lvl
-    integer                         :: nx, nx_prev, ix
+    integer                         :: nx, nx_prev, ix, max_boxes_per_block
     integer                         :: n_cycle_val, ncurve, ncurve_add
     integer                         :: lo(NDIM), hi(NDIM), vlo(NDIM), vhi(NDIM)
     integer                         :: blo(NDIM), bhi(NDIM)
+    integer                         :: nx_vec(NDIM)
     logical                         :: lo_bnd(NDIM), hi_bnd(NDIM)
     integer, allocatable            :: ids(:), nb_ids(:), icc_val(:)
     logical, allocatable            :: box_done(:)
@@ -1079,6 +1082,9 @@ contains
        var_names(n_cc+1:n_cc+n_add) = add_names(:)
     end if
 
+    ! Limit total number of boxes per output block
+    max_boxes_per_block = max(1, ceiling(tree%box_limit * 0.05_dp))
+
     nc = tree%n_cell
     n_grids_max = 0
     do lvl = 1, highest_lvl
@@ -1100,7 +1106,6 @@ contains
     fname = trim(filename) // ".silo"
     call SILO_create_file(trim(fname), dbix)
     call SILO_set_time_varying(dbix)
-    call SILO_mkdir(dbix, meshdir)
 
     ! Adding additional curve objects
     if (present(add_curve_names)) then
@@ -1170,6 +1175,7 @@ contains
              end if
 
              if (nx == nx_prev) exit
+             if (nx > max_boxes_per_block) exit
           end do
 
           ! Check for (periodic) boundaries (this could give problems for
@@ -1211,27 +1217,7 @@ contains
              var_data(vlo(1):vhi(1), :) = cc(blo(1):bhi(1), :)
           end do
 
-          id = box_list(1)
-          dr = tree%boxes(id)%dr
-          r_min = tree%boxes(id)%r_min - (1 - lo) * dr
-
-          write(grid_list(i_grid), "(A,I0)") meshdir // '/' // grid_name, i_grid
-          call SILO_add_grid(dbix, grid_list(i_grid), 1, &
-               hi - lo + 2, r_min, dr, 1-lo, hi - [nx] * nc)
-          write(grid_list_block(i_grid), "(A,I0)") meshdir // '/' // block_prefix &
-               // grid_name, i_grid
-          call SILO_add_grid(dbix, grid_list_block(i_grid), 1, [nx+1], &
-               tree%boxes(id)%r_min, nc*dr, [0], [0])
-
-          do iv = 1, n_cc+n_add
-             write(var_list(iv, i_grid), "(A,I0)") meshdir // '/' // &
-                  trim(var_names(iv)) // "_", i_grid
-             call SILO_add_var(dbix, var_list(iv, i_grid), grid_list(i_grid), &
-                  pack(var_data(:, iv), .true.), hi-lo+1)
-          end do
-
-          deallocate(var_data)
-          deallocate(box_list)
+          nx_vec = [nx]
 #elif NDIM == 2
           allocate(box_list(1,1))
           box_list(1,1) = id
@@ -1312,6 +1298,7 @@ contains
              end if
 
              if (nx == nx_prev .and. ny == ny_prev) exit
+             if (nx * ny > max_boxes_per_block) exit
           end do
 
           ! Check for (periodic) boundaries (this could give problems for
@@ -1356,27 +1343,7 @@ contains
              end do
           end do
 
-          id = box_list(1, 1)
-          dr = tree%boxes(id)%dr
-          r_min = tree%boxes(id)%r_min - (1 - lo) * dr
-
-          write(grid_list(i_grid), "(A,I0)") meshdir // '/' // grid_name, i_grid
-          call SILO_add_grid(dbix, grid_list(i_grid), 2, &
-               hi - lo + 2, r_min, dr, 1-lo, hi - [nx, ny] * nc, n_cycle_val)
-          write(grid_list_block(i_grid), "(A,I0)") meshdir // '/' // block_prefix &
-               // grid_name, i_grid
-          call SILO_add_grid(dbix, grid_list_block(i_grid), 2, [nx+1, ny+1], &
-               tree%boxes(id)%r_min, nc*dr, [0, 0], [0, 0], n_cycle_val)
-
-          do iv = 1, n_cc+n_add
-             write(var_list(iv, i_grid), "(A,I0)") meshdir // '/' // &
-                  trim(var_names(iv)) // "_", i_grid
-             call SILO_add_var(dbix, var_list(iv, i_grid), grid_list(i_grid), &
-                  pack(var_data(:, :, iv), .true.), hi-lo+1, n_cycle_val)
-          end do
-
-          deallocate(var_data)
-          deallocate(box_list)
+          nx_vec = [nx, ny]
 #elif NDIM == 3
           allocate(box_list(1,1,1))
           box_list(1,1,1) = id
@@ -1493,6 +1460,7 @@ contains
              end if
 
              if (nx == nx_prev .and. ny == ny_prev .and. nz == nz_prev) exit
+             if (nx * ny * nz > max_boxes_per_block) exit
           end do
 
           ! Check for (periodic) boundaries (this could give problems for
@@ -1539,29 +1507,37 @@ contains
              end do
           end do
 
-          id = box_list(1, 1, 1)
+          nx_vec = [nx, ny, nz]
+#endif
+
+          id = box_list(DTIMES(1))
           dr = tree%boxes(id)%dr
           r_min = tree%boxes(id)%r_min - (1 - lo) * dr
 
-          write(grid_list(i_grid), "(A,I0)") meshdir // '/' // grid_name, i_grid
-          call SILO_add_grid(dbix, grid_list(i_grid), 3, &
-               hi - lo + 2, r_min, dr, 1-lo, hi-[nx, ny, nz]*nc, n_cycle_val)
-          write(grid_list_block(i_grid), "(A,I0)") meshdir // '/' // block_prefix // &
+          write(dirname, '(A,I0)') meshdir, (i_grid-1)/blocks_per_dir
+
+          if (mod(i_grid-1, blocks_per_dir) == 0) then
+             ! First grid to be placed in directory, create it
+             call SILO_mkdir(dbix, trim(dirname))
+          end if
+
+          write(grid_list(i_grid), "(A,I0)") trim(dirname) // '/' // grid_name, i_grid
+          call SILO_add_grid(dbix, grid_list(i_grid), NDIM, &
+               hi - lo + 2, r_min, dr, 1-lo, hi-nx_vec*nc, n_cycle_val)
+          write(grid_list_block(i_grid), "(A,I0)") trim(dirname) // '/' // block_prefix // &
                grid_name, i_grid
-          call SILO_add_grid(dbix, grid_list_block(i_grid), 3, [nx+1, ny+1, nz+1], &
+          call SILO_add_grid(dbix, grid_list_block(i_grid), 3, nx_vec+1, &
                tree%boxes(id)%r_min, nc*dr, [0, 0, 0], [0, 0, 0], n_cycle_val)
 
           do iv = 1, n_cc+n_add
-             write(var_list(iv, i_grid), "(A,I0)") meshdir // '/' // &
+             write(var_list(iv, i_grid), "(A,I0)") trim(dirname) // '/' // &
                   trim(var_names(iv)) // "_", i_grid
              call SILO_add_var(dbix, var_list(iv, i_grid), grid_list(i_grid), &
-                  pack(var_data(:, :, :, iv), .true.), hi-lo+1, n_cycle_val)
+                  var_data(DTIMES(:), iv), hi-lo+1, n_cycle_val)
           end do
 
           deallocate(var_data)
           deallocate(box_list)
-#endif
-
        end do
     end do
 

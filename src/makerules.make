@@ -1,10 +1,10 @@
 # Disable built in rules
 .SUFFIXES:
 
-COMPILER = gfortran
+COMPILER = h5fc
 
-ifeq ($(COMPILER), gfortran)
-	FC := gfortran
+ifeq ($(COMPILER), h5fc)
+	FC := h5fc
 	FFLAGS := -O2 -g -std=f2008 -fopenmp -Wall -Wextra -Wimplicit-interface	\
 	-Wshadow -Wno-unused-dummy-argument -cpp -fPIC
 	ifeq ($(DEBUG), 1)

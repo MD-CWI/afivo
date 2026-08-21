@@ -1,8 +1,8 @@
 .PHONY: all clean
 
-CC := gcc
+CC := h5cc
 LDFLAGS := -L ../external_libraries/silo/lib
-LDLIBS := -lsilo -lm
+LDLIBS := -lsiloh5 -lm
 CPPFLAGS := -I ../external_libraries/silo/include -Wall
 
 all: silo_to_raw

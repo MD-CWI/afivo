@@ -9,7 +9,7 @@ module m_write_silo
 
   integer, parameter :: dp       = kind(0.0d0)
   integer, parameter :: line_len = 200
-  integer, parameter :: DB_TYPE  = DB_PDB
+  integer, parameter :: DB_TYPE  = DB_HDF5
 
   public :: SILO_mkdir
   public :: SILO_create_file
@@ -238,7 +238,7 @@ contains
   subroutine SILO_add_var(dbix, dataname, gridname, &
        d_packed, d_shape, n_cycle)
     character(len=*), intent(in) :: gridname, dataname
-    real(dp), intent(in)         :: d_packed(:)
+    real(dp), intent(in)         :: d_packed(*)
     integer, intent(in)          :: dbix, d_shape(:)
 
     integer                      :: dboptix, ierr, iostat
@@ -261,10 +261,6 @@ contains
          integer(c_int), intent(in) :: optlist_id, option, ivalue(*)
        end function dbaddiopt
     end interface
-
-    if (size(d_packed) /= product(d_shape)) then
-       error stop "Error: d_packed does not correspond to d_shape"
-    end if
 
     if (size(d_shape) < 1 .or. size(d_shape) > 3) then
        error stop "Error: size(d_shape) < 1 or size(d_shape) > 3"
